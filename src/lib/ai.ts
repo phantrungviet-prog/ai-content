@@ -1,5 +1,5 @@
 import "server-only";
-import { GoogleGenAI } from "@google/genai";
+import { ApiError, GoogleGenAI, type GenerateContentParameters } from "@google/genai";
 import { z } from "zod";
 import type { MenuDraft } from "@/lib/menu";
 import { parseVndPrice } from "@/lib/price";
@@ -11,6 +11,36 @@ function client() {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("Thiếu GEMINI_API_KEY trong .env.local");
   return new GoogleGenAI({ apiKey });
+}
+
+const RETRY_DELAYS_MS = [1500, 4000];
+
+// Calls Gemini, retrying overloads (503/500) that Google says are usually temporary,
+// and turns API errors into messages the admin can act on.
+async function generate(params: GenerateContentParameters) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await client().models.generateContent(params);
+    } catch (err) {
+      const status = err instanceof ApiError ? err.status : 0;
+      if ((status === 503 || status === 500) && attempt < RETRY_DELAYS_MS.length) {
+        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
+        continue;
+      }
+      console.error("Gemini call failed", { model: params.model, status, err });
+      throw new Error(friendlyError(status, err instanceof Error ? err.message : ""));
+    }
+  }
+}
+
+function friendlyError(status: number, message: string): string {
+  if (status === 503 || status === 500) return "Máy chủ AI của Google đang quá tải. Vui lòng thử lại sau ít phút.";
+  if (status === 429 && /limit: 0/.test(message))
+    return "Tài khoản Gemini chưa được phép dùng tính năng này ở gói miễn phí. Hãy bật Billing trong Google AI Studio.";
+  if (status === 429) return "Đã vượt giới hạn số lần gọi AI. Vui lòng đợi một lát rồi thử lại.";
+  if (status === 400 && /api key/i.test(message)) return "GEMINI_API_KEY không hợp lệ. Kiểm tra lại key trong .env.local.";
+  if (status === 404) return "Không tìm thấy model AI. Kiểm tra GEMINI_MODEL / GEMINI_IMAGE_MODEL trong .env.local.";
+  return "Gọi AI thất bại. Vui lòng thử lại.";
 }
 
 // Prices are returned verbatim and normalized by parseVndPrice, which is tested, instead of trusting the model's arithmetic.
@@ -46,7 +76,7 @@ export async function extractMenuFromImages(images: ImageInput[]): Promise<MenuD
   // One retry: occasional malformed output usually succeeds on a second attempt.
   let extracted: z.infer<typeof extractedMenuSchema> | null = null;
   for (let attempt = 0; attempt < 2 && !extracted; attempt++) {
-    const response = await client().models.generateContent({
+    const response = await generate({
       model: MODEL,
       contents: [
         {
@@ -109,7 +139,7 @@ STRICT RULES:
 - Product centered and fully visible, realistic perspective and contact shadow, sharp focus.
 - No added text, watermark, people, or extra props that could be mistaken for part of the product.`;
 
-  const response = await client().models.generateContent({
+  const response = await generate({
     model: IMAGE_MODEL,
     contents: [{ role: "user", parts: [{ inlineData: { data: image.data.toString("base64"), mimeType: image.mimeType } }, { text: prompt }] }],
     config: { responseModalities: ["IMAGE"], imageConfig: { aspectRatio } },
@@ -168,7 +198,7 @@ Thông tin:
 Chỉ dùng thông tin trên và những gì thấy rõ trong ảnh; không bịa khuyến mãi, chứng nhận hay cam kết. Viết tiếng Việt có dấu.`;
 
   for (let attempt = 0; attempt < 2; attempt++) {
-    const response = await client().models.generateContent({
+    const response = await generate({
       model: MODEL,
       contents: [
         {
