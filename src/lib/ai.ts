@@ -35,7 +35,7 @@ async function generate(params: GenerateContentParameters) {
 
 function friendlyError(status: number, message: string): string {
   if (status === 503 || status === 500) return "Máy chủ AI của Google đang quá tải. Vui lòng thử lại sau ít phút.";
-  if (status === 429 && /limit: 0/.test(message))
+  if (status === 429 && /free_tier|limit: 0\b/.test(message))
     return "Tài khoản Gemini chưa được phép dùng tính năng này ở gói miễn phí. Hãy bật Billing trong Google AI Studio.";
   if (status === 429) return "Đã vượt giới hạn số lần gọi AI. Vui lòng đợi một lát rồi thử lại.";
   if (status === 400 && /api key/i.test(message)) return "GEMINI_API_KEY không hợp lệ. Kiểm tra lại key trong .env.local.";
