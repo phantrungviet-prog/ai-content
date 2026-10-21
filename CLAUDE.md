@@ -8,8 +8,10 @@ Full plan: `C:\Users\ADMIN\.claude\plans\l-p-cho-t-i-m-t-binary-oasis.md`. The u
 
 ## Status
 - **Day 1 — done** (commit `b30e281`): admin login, clients CRUD, menu photo → Gemini → editable menu → publish → `/m/[slug]` + QR PNG.
-- **Day 2 — todo:**
-  1. Studio photos: upload product photo → Photoroom API (remove bg + AI background, 3–4 fixed presets) → save to `public-assets` → before/after + download. Needs `PHOTOROOM_API_KEY` in `.env.local` / `.env.example`; check current Photoroom API docs before coding.
+- **Day 2 — todo** (no Photoroom key needed):
+  1. Studio photos with **Nano Banana** (Gemini image model, same `GEMINI_API_KEY`; the user chose it over Photoroom): upload product photo → `generateContent` with the photo plus a background preset prompt → save the returned image to `public-assets` → before/after side by side + download. Model comes from a new `GEMINI_IMAGE_MODEL` env var (add it to `.env.example`; check the current model id in the bundled `@google/genai` types or the AI Studio docs). 3–4 fixed presets (e.g. clean white e-commerce, wooden café table, pastel studio, marble).
+     - Risk: the model redraws the whole image, so it can alter the product (food looks different, clothing colors shift, printed text or logos get warped). The prompt must say to keep the product exactly as it is and change only the background, lighting and shadow. The admin must approve a result before it is used; never auto-publish.
+     - If a product category keeps getting distorted, Photoroom (a real cutout) is the planned fallback. Keep the image call behind one function in `src/lib/ai.ts` so it can be swapped.
   2. "Viết bài" button: product description / Facebook caption / TikTok caption + hashtags via Gemini (`src/lib/ai.ts`), copy in one click.
   3. Public site `/s/[slug]`: one shared template (hero, products, link to menu, Zalo/phone/Maps).
   4. Payment level 1 (VietQR transfer): migration `0002` adds the client's bank (`bank_bin`, `bank_account_no`, `bank_account_name`) to `clients`, editable in `ClientInfoForm`. `/m/[slug]` shows a "Thanh toán chuyển khoản" button that opens a VietQR. Build the EMVCo/VietQR payload ourselves in `src/lib/vietqr.ts` (with a CRC16 unit test) and render it with `qrcode`, with no external image service. Make the function take an optional `amount` and `addInfo`; level 1 leaves both empty, and level 2 will pass them per order.
