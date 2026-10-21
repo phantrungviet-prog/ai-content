@@ -5,7 +5,7 @@ import type { MenuDraft } from "@/lib/menu";
 import { parseVndPrice } from "@/lib/price";
 import { STUDIO_PRESETS, TONES, type AspectRatio, type Platform, type StudioPreset, type Tone } from "@/lib/ai-options";
 
-const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
 
 function client() {
   const apiKey = process.env.GEMINI_API_KEY;
