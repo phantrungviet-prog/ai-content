@@ -8,16 +8,10 @@ Full plan: `C:\Users\ADMIN\.claude\plans\l-p-cho-t-i-m-t-binary-oasis.md`. The u
 
 ## Status
 - **Day 1 — done** (commit `b30e281`): admin login, clients CRUD, menu photo → Gemini → editable menu → publish → `/m/[slug]` + QR PNG.
-- **Day 2 — todo** (no Photoroom key needed):
-  1. Studio photos with **Nano Banana** (Gemini image model, same `GEMINI_API_KEY`; the user chose it over Photoroom): upload product photo → `generateContent` with the photo plus a background preset prompt → save the returned image to `public-assets` → before/after side by side + download. Model comes from a new `GEMINI_IMAGE_MODEL` env var (add it to `.env.example`; check the current model id in the bundled `@google/genai` types or the AI Studio docs). 3–4 fixed presets (e.g. clean white e-commerce, wooden café table, pastel studio, marble).
-     - Risk: the model redraws the whole image, so it can alter the product (food looks different, clothing colors shift, printed text or logos get warped). The prompt must say to keep the product exactly as it is and change only the background, lighting and shadow. The admin must approve a result before it is used; never auto-publish.
-     - If a product category keeps getting distorted, Photoroom (a real cutout) is the planned fallback. Keep the image call behind one function in `src/lib/ai.ts` so it can be swapped.
-  2. "Viết bài" button: product description / Facebook caption / TikTok caption + hashtags via Gemini (`src/lib/ai.ts`), copy in one click.
-  3. Public site `/s/[slug]`: one shared template (hero, products, link to menu, Zalo/phone/Maps).
-  4. Payment level 1 (VietQR transfer): migration `0002` adds the client's bank (`bank_bin`, `bank_account_no`, `bank_account_name`) to `clients`, editable in `ClientInfoForm`. `/m/[slug]` shows a "Thanh toán chuyển khoản" button that opens a VietQR. Build the EMVCo/VietQR payload ourselves in `src/lib/vietqr.ts` (with a CRC16 unit test) and render it with `qrcode`, with no external image service. Make the function take an optional `amount` and `addInfo`; level 1 leaves both empty, and level 2 will pass them per order.
-  5. Deploy to Vercel (push to GitHub first), set `NEXT_PUBLIC_SITE_URL`, scan the QR on a real phone.
-  Also fix: hide the visible scrollbar under the category chips on `/m/[slug]` (`MenuView.tsx`).
-  The client page `src/app/admin/clients/[id]/page.tsx` has "Sắp có" placeholder cards for features 1–2.
+- **Day 2 — code done**: products page (`/admin/clients/[id]/products`) with Nano Banana studio photos (candidate → admin approves) and AI posts (description / Facebook / TikTok, saved to `content_posts`); public site `/s/[slug]`; VietQR transfer button on `/m/[slug]` (`src/lib/vietqr.ts`, tested); bank fields on clients (migration `0002_bank_account.sql`); chip scrollbar hidden.
+  - Studio photos are **untested end-to-end**: every Gemini image model has a free-tier quota of 0, so the user must enable billing in Google AI Studio first. The text and vision features work on the free tier.
+  - Remaining: deploy to Vercel (push to GitHub first; `gh` CLI is not installed), set env vars there, set `NEXT_PUBLIC_SITE_URL`, scan the QR on a real phone.
+  - Image presets and the Platform/Tone choices live in `src/lib/ai-options.ts` (client-safe); `src/lib/ai.ts` is server-only.
 
 ## Roadmap after the MVP (not scheduled yet)
 - **Level 2: ordering at the table.** QR per table (`/m/[slug]?ban=5`); cart + notes; `orders` / `order_items` tables that snapshot name and price. Orders are created only through a server action that **recomputes prices from the DB** (never trusts client prices), with rate limiting. A staff screen gets live updates from Supabase Realtime. This needs per-shop staff accounts: a `client_members (user_id, client_id, role)` table, with RLS scoped to the shop, alongside `admins`. After an order, show a VietQR with the amount and "Ban 5 - DH123" filled in.

@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { BANKS } from "@/lib/vietqr";
 import type { FormState } from "@/app/admin/actions";
 import { updateClientAction } from "./actions";
 
@@ -13,6 +14,9 @@ export type ClientInfo = {
   address: string | null;
   map_url: string | null;
   intro: string | null;
+  bank_bin: string | null;
+  bank_account_no: string | null;
+  bank_account_name: string | null;
 };
 
 export function ClientInfoForm({ client }: { client: ClientInfo }) {
@@ -46,6 +50,23 @@ export function ClientInfoForm({ client }: { client: ClientInfo }) {
           <textarea name="intro" defaultValue={client.intro ?? ""} rows={3} className="input" />
         </Field>
       </div>
+      <h3 className="pt-2 font-medium sm:col-span-2">Nhận chuyển khoản (VietQR trên menu)</h3>
+      <Field label="Ngân hàng">
+        <select name="bank_bin" defaultValue={client.bank_bin ?? ""} className="input">
+          <option value="">Không dùng</option>
+          {BANKS.map((b) => (
+            <option key={b.bin} value={b.bin}>
+              {b.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label="Số tài khoản">
+        <input name="bank_account_no" defaultValue={client.bank_account_no ?? ""} inputMode="numeric" className="input" />
+      </Field>
+      <Field label="Tên chủ tài khoản">
+        <input name="bank_account_name" defaultValue={client.bank_account_name ?? ""} placeholder="NGUYEN VAN A" className="input" />
+      </Field>
       <div className="flex items-center gap-3 sm:col-span-2">
         <button disabled={pending} className="btn-primary">
           {pending ? "Đang lưu..." : "Lưu"}

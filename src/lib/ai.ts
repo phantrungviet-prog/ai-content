@@ -3,6 +3,7 @@ import { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
 import type { MenuDraft } from "@/lib/menu";
 import { parseVndPrice } from "@/lib/price";
+import { STUDIO_PRESETS, TONES, type AspectRatio, type Platform, type StudioPreset, type Tone } from "@/lib/ai-options";
 
 const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
@@ -90,4 +91,95 @@ function parseJson<T>(schema: z.ZodType<T>, text: string | undefined): T | null 
   } catch {
     return null;
   }
+}
+
+// ---------- Studio product photos (Nano Banana) ----------
+
+const IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || "gemini-3.1-flash-image";
+
+// The model redraws the whole image, so the prompt insists on leaving the product untouched;
+// an admin still approves every result before it is used.
+export async function generateStudioImage(image: ImageInput, preset: StudioPreset, aspectRatio: AspectRatio): Promise<ImageInput> {
+  const prompt = `This is a product photo taken with a phone by a small shop owner.
+Turn it into a professional, studio-quality product photo.
+STRICT RULES:
+- Keep the product itself EXACTLY as in the original: same shape, proportions, colors, textures, portion size, garnish, printed text and logos. Do not add, remove, beautify or redesign any part of the product.
+- Remove the original background, clutter and hands. If a garment hangs on a hanger, the hanger may stay.
+- Place the product on ${STUDIO_PRESETS[preset].prompt}.
+- Product centered and fully visible, realistic perspective and contact shadow, sharp focus.
+- No added text, watermark, people, or extra props that could be mistaken for part of the product.`;
+
+  const response = await client().models.generateContent({
+    model: IMAGE_MODEL,
+    contents: [{ role: "user", parts: [{ inlineData: { data: image.data.toString("base64"), mimeType: image.mimeType } }, { text: prompt }] }],
+    config: { responseModalities: ["IMAGE"], imageConfig: { aspectRatio } },
+  });
+
+  const part = response.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data);
+  if (!part?.inlineData?.data) {
+    const reason = response.candidates?.[0]?.finishReason ?? response.promptFeedback?.blockReason;
+    throw new Error(`AI không tạo được ảnh${reason ? ` (${reason})` : ""}, thử lại hoặc chọn nền khác`);
+  }
+  return { data: Buffer.from(part.inlineData.data, "base64"), mimeType: part.inlineData.mimeType ?? "image/png" };
+}
+
+// ---------- Marketing copy ----------
+
+const PLATFORM_BRIEF: Record<Platform, string> = {
+  description:
+    "Viết mô tả sản phẩm cho trang web, 60–120 từ, 1–2 đoạn, nêu điểm nổi bật, chất liệu/hương vị, phù hợp với ai. Không dùng emoji, không hashtag (hashtags là mảng rỗng).",
+  facebook:
+    "Viết bài đăng Facebook bán hàng: câu mở đầu gây chú ý, 3–5 đoạn ngắn, emoji vừa phải, nêu giá nếu có, kết bằng lời kêu gọi (inbox/gọi/ghé quán) kèm số điện thoại/địa chỉ nếu có. 5–8 hashtag tiếng Việt không dấu liên quan.",
+  tiktok:
+    "Viết caption TikTok ngắn dưới 150 ký tự, bắt tai, có emoji. 4–6 hashtag (có thể gồm #xuhuong #foryou nếu hợp). Điền video_idea: gợi ý quay video 15–30 giây gồm 3 cảnh ngắn.",
+};
+
+const postSchema = z.object({
+  body: z.string(),
+  hashtags: z.array(z.string()).describe("Hashtag, mỗi phần tử bắt đầu bằng #"),
+  video_idea: z.string().describe("Chỉ cho TikTok, ngược lại chuỗi rỗng"),
+});
+export type GeneratedPost = z.infer<typeof postSchema>;
+
+export async function generatePost(
+  input: {
+    shopName: string;
+    shopType: "shop" | "restaurant";
+    phone: string | null;
+    address: string | null;
+    productName: string;
+    price: string;
+    notes: string;
+    platform: Platform;
+    tone: Tone;
+  },
+  image?: ImageInput,
+): Promise<GeneratedPost> {
+  const prompt = `Bạn là copywriter cho ${input.shopType === "shop" ? "shop bán hàng online" : "quán ăn/quán nước"} tại Việt Nam.
+${PLATFORM_BRIEF[input.platform]}
+Giọng văn: ${TONES[input.tone]}.
+Thông tin:
+- Tên ${input.shopType === "shop" ? "shop" : "quán"}: ${input.shopName}
+- Sản phẩm: ${input.productName}
+- Giá: ${input.price || "không nêu"}
+- Ghi chú của chủ shop: ${input.notes || "không có"}
+- Điện thoại: ${input.phone || "không có"}
+- Địa chỉ: ${input.address || "không có"}
+Chỉ dùng thông tin trên và những gì thấy rõ trong ảnh; không bịa khuyến mãi, chứng nhận hay cam kết. Viết tiếng Việt có dấu.`;
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await client().models.generateContent({
+      model: MODEL,
+      contents: [
+        {
+          role: "user",
+          parts: [...(image ? [{ inlineData: { data: image.data.toString("base64"), mimeType: image.mimeType } }] : []), { text: prompt }],
+        },
+      ],
+      config: { responseMimeType: "application/json", responseJsonSchema: z.toJSONSchema(postSchema), temperature: 0.9 },
+    });
+    const post = parseJson(postSchema, response.text);
+    if (post) return { ...post, hashtags: post.hashtags.map((h) => (h.startsWith("#") ? h : `#${h}`)) };
+  }
+  throw new Error("AI trả về nội dung không hợp lệ, vui lòng thử lại");
 }

@@ -21,8 +21,8 @@ export default async function ClientPage(props: PageProps<"/admin/clients/[id]">
 
       <div className="grid gap-4 sm:grid-cols-3">
         <ToolCard href={`/admin/clients/${id}/menu`} title="Menu điện tử QR" desc="Chụp menu giấy → menu online + mã QR" />
-        <ToolCard title="Ảnh sản phẩm Studio" desc="Xóa phông, ghép nền đẹp" soon />
-        <ToolCard title="Viết bài AI" desc="Mô tả, caption Facebook / TikTok" soon />
+        <ToolCard href={`/admin/clients/${id}/products`} title="Sản phẩm · Ảnh Studio · Viết bài" desc="Ghép nền đẹp, viết caption Facebook / TikTok" />
+        <ToolCard href={`/s/${client.slug}`} title="Website" desc={`Trang giới thiệu /s/${client.slug}`} external />
       </div>
 
       <ClientInfoForm client={client} />
@@ -30,20 +30,18 @@ export default async function ClientPage(props: PageProps<"/admin/clients/[id]">
   );
 }
 
-function ToolCard({ href, title, desc, soon }: { href?: string; title: string; desc: string; soon?: boolean }) {
+function ToolCard({ href, title, desc, external }: { href: string; title: string; desc: string; external?: boolean }) {
   const body = (
     <>
       <p className="font-medium">
-        {title} {soon && <span className="ml-1 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">Sắp có</span>}
+        {title} {external && <span className="text-slate-400">↗</span>}
       </p>
       <p className="mt-1 text-sm text-slate-500">{desc}</p>
     </>
   );
-  return href ? (
-    <Link href={href} className="card block transition hover:ring-indigo-300">
+  return (
+    <Link href={href} target={external ? "_blank" : undefined} className="card block transition hover:ring-indigo-300">
       {body}
     </Link>
-  ) : (
-    <div className="card opacity-60">{body}</div>
   );
 }

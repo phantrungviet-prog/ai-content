@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import QRCode from "qrcode";
 import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
+import { bankName, vietQrPayload } from "@/lib/vietqr";
 import { MenuView, type PublicCategory } from "./MenuView";
+import { PaymentButton } from "./PaymentButton";
 
 // Always serve the latest prices.
 export const dynamic = "force-dynamic";
@@ -11,7 +14,7 @@ const loadMenu = cache(async (slug: string) => {
   const supabase = await createClient();
   const { data: client } = await supabase
     .from("clients")
-    .select("id, name, address, phone, zalo, map_url, logo_url")
+    .select("id, name, address, phone, zalo, map_url, logo_url, bank_bin, bank_account_no, bank_account_name")
     .eq("slug", slug)
     .maybeSingle();
   if (!client) return null;
@@ -45,6 +48,15 @@ export default async function PublicMenuPage(props: PageProps<"/m/[slug]">) {
   const data = await loadMenu((await props.params).slug);
   if (!data) notFound();
   const { client, title, categories } = data;
+  const payment =
+    client.bank_bin && client.bank_account_no
+      ? {
+          qrDataUrl: await QRCode.toDataURL(vietQrPayload({ bin: client.bank_bin, accountNo: client.bank_account_no }), { width: 600, margin: 2 }),
+          bank: bankName(client.bank_bin),
+          accountNo: client.bank_account_no as string,
+          accountName: client.bank_account_name as string | null,
+        }
+      : null;
 
   return (
     <div className="mx-auto w-full max-w-lg flex-1 bg-white pb-12 shadow-sm">
@@ -66,6 +78,7 @@ export default async function PublicMenuPage(props: PageProps<"/m/[slug]">) {
         </div>
       </header>
       <MenuView categories={categories} />
+      {payment && <PaymentButton {...payment} />}
     </div>
   );
 }

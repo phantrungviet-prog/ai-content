@@ -23,3 +23,10 @@ body {
     @apply rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200;
   }
 }
+
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
