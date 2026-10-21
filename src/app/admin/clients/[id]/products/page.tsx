@@ -44,7 +44,8 @@ export default async function ProductsPage(props: PageProps<"/admin/clients/[id]
         </Link>
         <h1 className="mt-1 text-2xl font-semibold">Sản phẩm · Ảnh Studio · Viết bài</h1>
       </div>
-      <ProductManager clientId={id} products={products} />
+      {/* Automatic generation needs a billed Gemini project; without it the admin uses the Gemini app by hand. */}
+      <ProductManager clientId={id} products={products} autoStudio={process.env.GEMINI_IMAGE_ENABLED === "true"} />
     </div>
   );
 }

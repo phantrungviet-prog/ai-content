@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { ASPECT_RATIOS, PLATFORMS, STUDIO_PRESETS, TONES, type AspectRatio, type Platform, type StudioPreset, type Tone } from "@/lib/ai-options";
+import { ASPECT_RATIOS, PLATFORMS, STUDIO_PRESETS, studioPrompt, TONES, type AspectRatio, type Platform, type StudioPreset, type Tone } from "@/lib/ai-options";
 import { resizeImage } from "@/lib/image-resize";
 import { formatVnd } from "@/lib/price";
 import { createClient } from "@/lib/supabase/client";
@@ -24,14 +24,14 @@ export type ProductView = {
   studioImages: { path: string; url: string }[];
 };
 
-export function ProductManager({ clientId, products }: { clientId: string; products: ProductView[] }) {
+export function ProductManager({ clientId, products, autoStudio }: { clientId: string; products: ProductView[]; autoStudio: boolean }) {
   return (
     <div className="space-y-6">
       <NewProductForm clientId={clientId} />
       {products.length === 0 ? (
         <p className="text-slate-500">Chưa có sản phẩm. Thêm sản phẩm đầu tiên ở trên.</p>
       ) : (
-        products.map((p) => <ProductCard key={p.id} product={p} />)
+        products.map((p) => <ProductCard key={p.id} clientId={clientId} product={p} autoStudio={autoStudio} />)
       )}
     </div>
   );
@@ -96,7 +96,7 @@ function NewProductForm({ clientId }: { clientId: string }) {
   );
 }
 
-function ProductCard({ product }: { product: ProductView }) {
+function ProductCard({ clientId, product, autoStudio }: { clientId: string; product: ProductView; autoStudio: boolean }) {
   const [deleting, startDelete] = useTransition();
   return (
     <article className="card space-y-5">
@@ -119,14 +119,15 @@ function ProductCard({ product }: { product: ProductView }) {
           {deleting ? "Đang xóa..." : "Xóa"}
         </button>
       </header>
-      <StudioSection product={product} />
+      <StudioSection clientId={clientId} product={product} autoStudio={autoStudio} />
       <PostSection product={product} />
     </article>
   );
 }
 
-function StudioSection({ product }: { product: ProductView }) {
+function StudioSection({ clientId, product, autoStudio }: { clientId: string; product: ProductView; autoStudio: boolean }) {
   const [preset, setPreset] = useState<StudioPreset>("white");
+  const [copied, setCopied] = useState(false);
   const [ratio, setRatio] = useState<AspectRatio>("1:1");
   const [candidates, setCandidates] = useState<{ path: string; url: string }[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -140,13 +141,37 @@ function StudioSection({ product }: { product: ProductView }) {
     setBusy(null);
   }
 
-  if (!product.originalUrl) {
-    return <p className="text-sm text-slate-500">Sản phẩm chưa có ảnh gốc nên chưa tạo được ảnh Studio.</p>;
+  // Images made by hand in the Gemini app: the admin already chose them, so they are approved on upload.
+  async function uploadStudioImage(file: File) {
+    await run("upload", async () => {
+      try {
+        const blob = await resizeImage(file, 2048, 0.92);
+        const path = `${clientId}/products/${product.id}/${crypto.randomUUID()}.jpg`;
+        const { error } = await createClient().storage.from("public-assets").upload(path, blob, { contentType: "image/jpeg" });
+        if (error) return { ok: false, error: `Tải ảnh thất bại: ${error.message}` };
+        return await approveStudioImageAction(product.id, path);
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : "Có lỗi xảy ra." };
+      }
+    });
   }
 
   return (
     <section className="space-y-3">
       <h3 className="font-medium">Ảnh Studio</h3>
+      <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-600">
+        <li>Chọn kiểu nền rồi bấm <b>Copy prompt</b>.</li>
+        <li>
+          Mở{" "}
+          <a href="https://gemini.google.com/app" target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">
+            Gemini
+          </a>
+          , đính kèm ảnh gốc, dán prompt và gửi. Tải ảnh kết quả về máy.
+        </li>
+        <li>
+          Bấm <b>Tải ảnh studio lên</b>. Nhớ kiểm tra AI có vẽ sai sản phẩm không.
+        </li>
+      </ol>
       <div className="flex flex-wrap items-end gap-2">
         <select value={preset} onChange={(e) => setPreset(e.target.value as StudioPreset)} className="input w-auto">
           {Object.entries(STUDIO_PRESETS).map(([key, p]) => (
@@ -155,31 +180,65 @@ function StudioSection({ product }: { product: ProductView }) {
             </option>
           ))}
         </select>
-        <select value={ratio} onChange={(e) => setRatio(e.target.value as AspectRatio)} className="input w-auto">
-          {ASPECT_RATIOS.map((r) => (
-            <option key={r} value={r}>
-              {r === "1:1" ? "Vuông 1:1" : r === "3:4" ? "Dọc 3:4 (Facebook)" : "Dọc 9:16 (TikTok/Story)"}
-            </option>
-          ))}
-        </select>
         <button
-          disabled={busy !== null}
-          className="btn-primary"
-          onClick={() =>
-            run("generate", async () => {
-              const result = await generateStudioImageAction(product.id, preset, ratio);
-              if (result.ok) setCandidates((c) => [result.data, ...c]);
-              return result;
-            })
-          }
+          className="btn-secondary"
+          onClick={async () => {
+            await navigator.clipboard.writeText(studioPrompt(preset));
+            setCopied(true);
+          }}
         >
-          {busy === "generate" ? "AI đang tạo ảnh (~20 giây)..." : "Tạo ảnh"}
+          {copied ? "Đã copy prompt" : "Copy prompt"}
         </button>
+        {product.originalUrl && (
+          <button className="btn-secondary" onClick={() => download(product.originalUrl!, `${product.name}-goc.jpg`)}>
+            Tải ảnh gốc
+          </button>
+        )}
+        <label className={`btn-primary cursor-pointer ${busy !== null ? "pointer-events-none opacity-50" : ""}`}>
+          {busy === "upload" ? "Đang tải lên..." : "Tải ảnh studio lên"}
+          <input
+            type="file"
+            accept="image/*"
+            className="hidden"
+            disabled={busy !== null}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (file) uploadStudioImage(file);
+            }}
+          />
+        </label>
       </div>
+
+      {autoStudio && product.originalUrl && (
+        <div className="flex flex-wrap items-end gap-2 border-t border-dashed border-slate-200 pt-3">
+          <span className="text-sm text-slate-500">Hoặc tạo tự động qua API:</span>
+          <select value={ratio} onChange={(e) => setRatio(e.target.value as AspectRatio)} className="input w-auto">
+            {ASPECT_RATIOS.map((r) => (
+              <option key={r} value={r}>
+                {r === "1:1" ? "Vuông 1:1" : r === "3:4" ? "Dọc 3:4 (Facebook)" : "Dọc 9:16 (TikTok/Story)"}
+              </option>
+            ))}
+          </select>
+          <button
+            disabled={busy !== null}
+            className="btn-secondary"
+            onClick={() =>
+              run("generate", async () => {
+                const result = await generateStudioImageAction(product.id, preset, ratio);
+                if (result.ok) setCandidates((c) => [result.data, ...c]);
+                return result;
+              })
+            }
+          >
+            {busy === "generate" ? "AI đang tạo ảnh (~20 giây)..." : "Tạo tự động"}
+          </button>
+        </div>
+      )}
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Figure url={product.originalUrl} caption="Ảnh gốc" />
+        {product.originalUrl && <Figure url={product.originalUrl} caption="Ảnh gốc" />}
 
         {candidates.map((c) => (
           <Figure key={c.path} url={c.url} caption="Ảnh mới: kiểm tra sản phẩm có bị AI vẽ sai không" highlight>

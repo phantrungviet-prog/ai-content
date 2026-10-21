@@ -3,7 +3,7 @@ import { ApiError, GoogleGenAI, type GenerateContentParameters } from "@google/g
 import { z } from "zod";
 import type { MenuDraft } from "@/lib/menu";
 import { parseVndPrice } from "@/lib/price";
-import { STUDIO_PRESETS, TONES, type AspectRatio, type Platform, type StudioPreset, type Tone } from "@/lib/ai-options";
+import { studioPrompt, TONES, type AspectRatio, type Platform, type StudioPreset, type Tone } from "@/lib/ai-options";
 
 const MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
 
@@ -130,14 +130,7 @@ const IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || "gemini-3.1-flash-image";
 // The model redraws the whole image, so the prompt insists on leaving the product untouched;
 // an admin still approves every result before it is used.
 export async function generateStudioImage(image: ImageInput, preset: StudioPreset, aspectRatio: AspectRatio): Promise<ImageInput> {
-  const prompt = `This is a product photo taken with a phone by a small shop owner.
-Turn it into a professional, studio-quality product photo.
-STRICT RULES:
-- Keep the product itself EXACTLY as in the original: same shape, proportions, colors, textures, portion size, garnish, printed text and logos. Do not add, remove, beautify or redesign any part of the product.
-- Remove the original background, clutter and hands. If a garment hangs on a hanger, the hanger may stay.
-- Place the product on ${STUDIO_PRESETS[preset].prompt}.
-- Product centered and fully visible, realistic perspective and contact shadow, sharp focus.
-- No added text, watermark, people, or extra props that could be mistaken for part of the product.`;
+  const prompt = studioPrompt(preset);
 
   const response = await generate({
     model: IMAGE_MODEL,

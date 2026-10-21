@@ -9,7 +9,7 @@ Full plan: `C:\Users\ADMIN\.claude\plans\l-p-cho-t-i-m-t-binary-oasis.md`. The u
 ## Status
 - **Day 1 — done** (commit `b30e281`): admin login, clients CRUD, menu photo → Gemini → editable menu → publish → `/m/[slug]` + QR PNG.
 - **Day 2 — code done**: products page (`/admin/clients/[id]/products`) with Nano Banana studio photos (candidate → admin approves) and AI posts (description / Facebook / TikTok, saved to `content_posts`); public site `/s/[slug]`; VietQR transfer button on `/m/[slug]` (`src/lib/vietqr.ts`, tested); bank fields on clients (migration `0002_bank_account.sql`); chip scrollbar hidden.
-  - Studio photos are **untested end-to-end**: every Gemini image model has a free-tier quota of 0, so the user must enable billing in Google AI Studio first. The text and vision features work on the free tier.
+  - Studio photos: every Gemini image model has a free-tier quota of 0, and the user has no card to enable billing. The **main flow is manual**: copy `studioPrompt(preset)`, generate in the Gemini app (user has Google AI Pro), then use "Tải ảnh studio lên", which uploads to `public-assets` and approves directly. The API flow (`generateStudioImageAction`) is hidden unless `GEMINI_IMAGE_ENABLED=true` and has never been tested end-to-end. The text and vision features work on the free tier.
   - Remaining: deploy to Vercel (push to GitHub first; `gh` CLI is not installed), set env vars there, set `NEXT_PUBLIC_SITE_URL`, scan the QR on a real phone.
   - Image presets and the Platform/Tone choices live in `src/lib/ai-options.ts` (client-safe); `src/lib/ai.ts` is server-only.
 
