@@ -14,10 +14,21 @@ const FALLBACK_MODELS = (process.env.GEMINI_FALLBACK_MODELS ?? "gemini-3.6-flash
   .filter((m) => m && m !== MODEL);
 const TEXT_MODELS = [MODEL, ...FALLBACK_MODELS];
 
-// A single model may hang for minutes. Callers make at most two generate() calls, so 2 x 120s
-// stays under the pages' maxDuration (300s) and the user gets a message instead of a killed request.
-const CALL_TIMEOUT_MS = 60_000;
-const GENERATE_BUDGET_MS = 120_000;
+// A model may hang for minutes. One user request (every model and round, and a retry on malformed output)
+// must end before the pages' maxDuration (300s), so the user gets a message instead of a killed request.
+// Measured on a 46-item menu: the lite model needs ~45s, so one call may take up to 120s.
+const CALL_TIMEOUT_MS = 120_000;
+const REQUEST_BUDGET_MS = 250_000;
+const requestDeadline = () => Date.now() + REQUEST_BUDGET_MS;
+// Waits before trying every model again when all of them turned the request down. Google says overload
+// spikes are usually short, and a 503 comes back within seconds, so another round is cheap.
+const ROUND_DELAYS_MS = [5_000, 15_000, 30_000];
+
+// A model that just failed is tried last for a while, so the next request does not wait on it again.
+// This lives per server instance, which is enough to route around a model that is down right now.
+const COOLDOWN_MS = 5 * 60_000;
+const cooldownUntil = new Map<string, number>();
+const coolingDown = (model: string) => (cooldownUntil.get(model) ?? 0) > Date.now();
 
 function client() {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -27,28 +38,36 @@ function client() {
 
 // Calls Gemini with the first model that answers, moving on when one is overloaded, out of quota or too slow,
 // and turns API errors into messages the admin can act on.
-async function generate(models: string[], params: Omit<GenerateContentParameters, "model">) {
+async function generate(models: string[], params: Omit<GenerateContentParameters, "model">, deadline: number) {
   // Outside the try: a missing key must surface as is, not as a generic API failure.
   const ai = client();
-  const deadline = Date.now() + GENERATE_BUDGET_MS;
   let last = { status: 0, message: "", timedOut: false };
-  for (const model of models) {
-    const remaining = deadline - Date.now();
-    if (remaining < 5_000) break;
-    try {
-      return await ai.models.generateContent({
-        ...params,
-        model,
-        config: { ...params.config, abortSignal: AbortSignal.timeout(Math.min(CALL_TIMEOUT_MS, remaining)) },
-      });
-    } catch (err) {
-      const status = err instanceof ApiError ? err.status : 0;
-      const timedOut = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
-      console.error("Gemini call failed", { model, status, timedOut, err });
-      last = { status, message: err instanceof Error ? err.message : "", timedOut };
-      // Overload, slowness and quota are per model, so the next one may work; a bad key or request would not.
-      if (!(timedOut || status === 503 || status === 500 || status === 429)) break;
+  for (let round = 0; ; round++) {
+    const ordered = [...models.filter((m) => !coolingDown(m)), ...models.filter(coolingDown)];
+    for (const model of ordered) {
+      const remaining = deadline - Date.now();
+      if (remaining < 5_000) break;
+      try {
+        const response = await ai.models.generateContent({
+          ...params,
+          model,
+          config: { ...params.config, abortSignal: AbortSignal.timeout(Math.min(CALL_TIMEOUT_MS, remaining)) },
+        });
+        cooldownUntil.delete(model);
+        return response;
+      } catch (err) {
+        const status = err instanceof ApiError ? err.status : 0;
+        const timedOut = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+        console.error("Gemini call failed", { model, round, status, timedOut, err });
+        last = { status, message: err instanceof Error ? err.message : "", timedOut };
+        // Overload, slowness and quota are per model, so the next one may work; a bad key or request would not.
+        if (!(timedOut || status === 503 || status === 500 || status === 429)) throw new Error(friendlyError(status, last.message, timedOut));
+        cooldownUntil.set(model, Date.now() + COOLDOWN_MS);
+      }
     }
+    const delay = ROUND_DELAYS_MS[round];
+    if (delay === undefined || deadline - Date.now() < delay + 30_000) break;
+    await new Promise((resolve) => setTimeout(resolve, delay));
   }
   throw new Error(friendlyError(last.status, last.message, last.timedOut));
 }
@@ -56,7 +75,7 @@ async function generate(models: string[], params: Omit<GenerateContentParameters
 function friendlyError(status: number, message: string, timedOut: boolean): string {
   if (timedOut) return "AI của Google đang phản hồi quá chậm. Vui lòng thử lại sau ít phút.";
   if (status === 503 || status === 500) return "Máy chủ AI của Google đang quá tải. Vui lòng thử lại sau ít phút.";
-  if (status === 429 && /free_tier|limit: 0/.test(message))
+  if (status === 429 && /free_tier|limit: 0\b/.test(message))
     return "Tài khoản Gemini chưa được phép dùng tính năng này ở gói miễn phí. Hãy bật Billing trong Google AI Studio.";
   if (status === 429) return "Đã vượt giới hạn số lần gọi AI. Vui lòng đợi một lát rồi thử lại.";
   if (status === 400 && /api key/i.test(message)) return "GEMINI_API_KEY không hợp lệ. Kiểm tra lại key trong .env.local.";
@@ -97,6 +116,7 @@ export type ImageInput = { data: Buffer; mimeType: string };
 export async function extractMenuFromImages(images: ImageInput[]): Promise<MenuDraft> {
   // One retry: occasional malformed output usually succeeds on a second attempt.
   let extracted: z.infer<typeof extractedMenuSchema> | null = null;
+  const deadline = requestDeadline();
   for (let attempt = 0; attempt < 2 && !extracted; attempt++) {
     const response = await generate(TEXT_MODELS, {
       contents: [
@@ -113,7 +133,7 @@ export async function extractMenuFromImages(images: ImageInput[]): Promise<MenuD
         responseJsonSchema: z.toJSONSchema(extractedMenuSchema),
         temperature: 0.1,
       },
-    });
+    }, deadline);
     extracted = parseJson(extractedMenuSchema, response.text);
   }
   if (!extracted) throw new Error("AI trả về dữ liệu menu không hợp lệ, vui lòng thử lại");
@@ -156,7 +176,7 @@ export async function generateStudioImage(image: ImageInput, preset: StudioPrese
   const response = await generate([IMAGE_MODEL], {
     contents: [{ role: "user", parts: [{ inlineData: { data: image.data.toString("base64"), mimeType: image.mimeType } }, { text: prompt }] }],
     config: { responseModalities: ["IMAGE"], imageConfig: { aspectRatio } },
-  });
+  }, requestDeadline());
 
   const part = response.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data);
   if (!part?.inlineData?.data) {
@@ -210,6 +230,7 @@ Thông tin:
 - Địa chỉ: ${input.address || "không có"}
 Chỉ dùng thông tin trên và những gì thấy rõ trong ảnh; không bịa khuyến mãi, chứng nhận hay cam kết. Viết tiếng Việt có dấu.`;
 
+  const deadline = requestDeadline();
   for (let attempt = 0; attempt < 2; attempt++) {
     const response = await generate(TEXT_MODELS, {
       contents: [
@@ -219,7 +240,7 @@ Chỉ dùng thông tin trên và những gì thấy rõ trong ảnh; không bị
         },
       ],
       config: { responseMimeType: "application/json", responseJsonSchema: z.toJSONSchema(postSchema), temperature: 0.9 },
-    });
+    }, deadline);
     const post = parseJson(postSchema, response.text);
     if (post) return { ...post, hashtags: post.hashtags.map((h) => (h.startsWith("#") ? h : `#${h}`)) };
   }
