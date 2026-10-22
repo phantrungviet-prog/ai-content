@@ -6,8 +6,9 @@ import type { MenuDraft } from "@/lib/menu";
 import { siteUrl } from "@/lib/site-url";
 import { MenuEditor } from "./MenuEditor";
 
-// AI menu extraction runs inside this page's server action and can take ~30s.
-export const maxDuration = 60;
+// AI calls run in this page's server actions. Free-tier Gemini can be slow, so allow the Vercel Hobby
+// maximum; src/lib/ai.ts times out its own calls well before this.
+export const maxDuration = 300;
 
 export default async function MenuPage(props: PageProps<"/admin/clients/[id]/menu">) {
   const { id } = await props.params;

@@ -6,6 +6,18 @@ import { parseVndPrice } from "@/lib/price";
 import { studioPrompt, TONES, type AspectRatio, type Platform, type StudioPreset, type Tone } from "@/lib/ai-options";
 
 const MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+// Free-tier models are shared with everyone and often overloaded (503) or slow, so text and vision calls
+// fall back to these, in order. Comma-separated; set GEMINI_FALLBACK_MODELS="" to disable.
+const FALLBACK_MODELS = (process.env.GEMINI_FALLBACK_MODELS ?? "gemini-3.6-flash,gemini-3.5-flash-lite")
+  .split(",")
+  .map((m) => m.trim())
+  .filter((m) => m && m !== MODEL);
+const TEXT_MODELS = [MODEL, ...FALLBACK_MODELS];
+
+// A single model may hang for minutes. Callers make at most two generate() calls, so 2 x 120s
+// stays under the pages' maxDuration (300s) and the user gets a message instead of a killed request.
+const CALL_TIMEOUT_MS = 60_000;
+const GENERATE_BUDGET_MS = 120_000;
 
 function client() {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -13,31 +25,38 @@ function client() {
   return new GoogleGenAI({ apiKey });
 }
 
-const RETRY_DELAYS_MS = [1500, 4000];
-
-// Calls Gemini, retrying overloads (503/500) that Google says are usually temporary,
+// Calls Gemini with the first model that answers, moving on when one is overloaded, out of quota or too slow,
 // and turns API errors into messages the admin can act on.
-async function generate(params: GenerateContentParameters) {
+async function generate(models: string[], params: Omit<GenerateContentParameters, "model">) {
   // Outside the try: a missing key must surface as is, not as a generic API failure.
   const ai = client();
-  for (let attempt = 0; ; attempt++) {
+  const deadline = Date.now() + GENERATE_BUDGET_MS;
+  let last = { status: 0, message: "", timedOut: false };
+  for (const model of models) {
+    const remaining = deadline - Date.now();
+    if (remaining < 5_000) break;
     try {
-      return await ai.models.generateContent(params);
+      return await ai.models.generateContent({
+        ...params,
+        model,
+        config: { ...params.config, abortSignal: AbortSignal.timeout(Math.min(CALL_TIMEOUT_MS, remaining)) },
+      });
     } catch (err) {
       const status = err instanceof ApiError ? err.status : 0;
-      if ((status === 503 || status === 500) && attempt < RETRY_DELAYS_MS.length) {
-        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
-        continue;
-      }
-      console.error("Gemini call failed", { model: params.model, status, err });
-      throw new Error(friendlyError(status, err instanceof Error ? err.message : ""));
+      const timedOut = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+      console.error("Gemini call failed", { model, status, timedOut, err });
+      last = { status, message: err instanceof Error ? err.message : "", timedOut };
+      // Overload, slowness and quota are per model, so the next one may work; a bad key or request would not.
+      if (!(timedOut || status === 503 || status === 500 || status === 429)) break;
     }
   }
+  throw new Error(friendlyError(last.status, last.message, last.timedOut));
 }
 
-function friendlyError(status: number, message: string): string {
+function friendlyError(status: number, message: string, timedOut: boolean): string {
+  if (timedOut) return "AI của Google đang phản hồi quá chậm. Vui lòng thử lại sau ít phút.";
   if (status === 503 || status === 500) return "Máy chủ AI của Google đang quá tải. Vui lòng thử lại sau ít phút.";
-  if (status === 429 && /free_tier|limit: 0\b/.test(message))
+  if (status === 429 && /free_tier|limit: 0/.test(message))
     return "Tài khoản Gemini chưa được phép dùng tính năng này ở gói miễn phí. Hãy bật Billing trong Google AI Studio.";
   if (status === 429) return "Đã vượt giới hạn số lần gọi AI. Vui lòng đợi một lát rồi thử lại.";
   if (status === 400 && /api key/i.test(message)) return "GEMINI_API_KEY không hợp lệ. Kiểm tra lại key trong .env.local.";
@@ -79,8 +98,7 @@ export async function extractMenuFromImages(images: ImageInput[]): Promise<MenuD
   // One retry: occasional malformed output usually succeeds on a second attempt.
   let extracted: z.infer<typeof extractedMenuSchema> | null = null;
   for (let attempt = 0; attempt < 2 && !extracted; attempt++) {
-    const response = await generate({
-      model: MODEL,
+    const response = await generate(TEXT_MODELS, {
       contents: [
         {
           role: "user",
@@ -135,8 +153,7 @@ const IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || "gemini-3.1-flash-image";
 export async function generateStudioImage(image: ImageInput, preset: StudioPreset, aspectRatio: AspectRatio): Promise<ImageInput> {
   const prompt = studioPrompt(preset);
 
-  const response = await generate({
-    model: IMAGE_MODEL,
+  const response = await generate([IMAGE_MODEL], {
     contents: [{ role: "user", parts: [{ inlineData: { data: image.data.toString("base64"), mimeType: image.mimeType } }, { text: prompt }] }],
     config: { responseModalities: ["IMAGE"], imageConfig: { aspectRatio } },
   });
@@ -194,8 +211,7 @@ Thông tin:
 Chỉ dùng thông tin trên và những gì thấy rõ trong ảnh; không bịa khuyến mãi, chứng nhận hay cam kết. Viết tiếng Việt có dấu.`;
 
   for (let attempt = 0; attempt < 2; attempt++) {
-    const response = await generate({
-      model: MODEL,
+    const response = await generate(TEXT_MODELS, {
       contents: [
         {
           role: "user",

@@ -3,8 +3,9 @@ import { notFound } from "next/navigation";
 import { requireClientAccess } from "@/lib/auth";
 import { ProductManager, type ProductView } from "./ProductManager";
 
-// Image generation and copywriting run in this page's server actions and can take ~30s.
-export const maxDuration = 60;
+// AI calls run in this page's server actions. Free-tier Gemini can be slow, so allow the Vercel Hobby
+// maximum; src/lib/ai.ts times out its own calls well before this.
+export const maxDuration = 300;
 
 export default async function ProductsPage(props: PageProps<"/admin/clients/[id]/products">) {
   const { id } = await props.params;
