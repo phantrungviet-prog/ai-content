@@ -5,16 +5,19 @@ import { ClientInfoForm } from "./ClientInfoForm";
 
 export default async function ClientPage(props: PageProps<"/admin/clients/[id]">) {
   const { id } = await props.params;
-  const { supabase } = await requireClientAccess(id);
+  const { supabase, isAdmin } = await requireClientAccess(id);
   const { data: client } = await supabase.from("clients").select("*").eq("id", id).maybeSingle();
   if (!client) notFound();
 
   return (
     <div className="space-y-6">
       <div>
-        <Link href="/admin" className="text-sm text-slate-500 hover:text-slate-900">
-          ← Khách hàng
-        </Link>
+        {/* Owners have just this one shop, so only the super admin has a list to go back to. */}
+        {isAdmin && (
+          <Link href="/admin" className="text-sm text-slate-500 hover:text-slate-900">
+            ← Khách hàng
+          </Link>
+        )}
         <h1 className="mt-1 text-2xl font-semibold">{client.name}</h1>
         <p className="text-sm text-slate-500">Đường dẫn cố định: /{client.slug}</p>
       </div>

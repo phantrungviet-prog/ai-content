@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-// Refreshes the Supabase session cookie and keeps signed-out visitors out of /admin.
+// Refreshes the Supabase session cookie and sends visitors to the right auth page.
 // This is only an optimistic check: data access is enforced by RLS and the helpers in src/lib/auth.ts.
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -23,14 +23,26 @@ export async function proxy(request: NextRequest) {
   );
 
   const { data } = await supabase.auth.getClaims();
-  if (!data?.claims && request.nextUrl.pathname.startsWith("/admin")) {
+  const path = request.nextUrl.pathname;
+  const redirectTo = (pathname: string) => {
     const url = request.nextUrl.clone();
-    url.pathname = "/login";
-    return NextResponse.redirect(url);
+    url.pathname = pathname;
+    url.search = "";
+    const redirect = NextResponse.redirect(url);
+    // Keep any session cookie refreshed above.
+    for (const cookie of response.cookies.getAll()) redirect.cookies.set(cookie);
+    return redirect;
+  };
+  if (!data?.claims) {
+    if (path.startsWith("/admin") || path === "/onboarding") return redirectTo("/login");
+    // The reset link signs the user in first; without a session the link was never opened or has expired.
+    if (path === "/reset-password") return redirectTo("/forgot-password");
+  } else if (path === "/login" || path === "/signup") {
+    return redirectTo("/admin");
   }
   return response;
 }
 
 export const config = {
-  matcher: ["/admin/:path*", "/login"],
+  matcher: ["/admin/:path*", "/login", "/signup", "/onboarding", "/reset-password"],
 };
