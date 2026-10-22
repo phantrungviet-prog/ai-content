@@ -18,9 +18,11 @@ const RETRY_DELAYS_MS = [1500, 4000];
 // Calls Gemini, retrying overloads (503/500) that Google says are usually temporary,
 // and turns API errors into messages the admin can act on.
 async function generate(params: GenerateContentParameters) {
+  // Outside the try: a missing key must surface as is, not as a generic API failure.
+  const ai = client();
   for (let attempt = 0; ; attempt++) {
     try {
-      return await client().models.generateContent(params);
+      return await ai.models.generateContent(params);
     } catch (err) {
       const status = err instanceof ApiError ? err.status : 0;
       if ((status === 503 || status === 500) && attempt < RETRY_DELAYS_MS.length) {
@@ -40,7 +42,8 @@ function friendlyError(status: number, message: string): string {
   if (status === 429) return "Đã vượt giới hạn số lần gọi AI. Vui lòng đợi một lát rồi thử lại.";
   if (status === 400 && /api key/i.test(message)) return "GEMINI_API_KEY không hợp lệ. Kiểm tra lại key trong .env.local.";
   if (status === 404) return "Không tìm thấy model AI. Kiểm tra GEMINI_MODEL / GEMINI_IMAGE_MODEL trong .env.local.";
-  return "Gọi AI thất bại. Vui lòng thử lại.";
+  // The code (0 = no HTTP response, e.g. network error) lets the admin tell causes apart without reading logs.
+  return `Gọi AI thất bại (mã ${status}). Vui lòng thử lại.`;
 }
 
 // Prices are returned verbatim and normalized by parseVndPrice, which is tested, instead of trusting the model's arithmetic.
