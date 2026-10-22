@@ -1,12 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireAdmin } from "@/lib/auth";
+import { requireClientAccess } from "@/lib/auth";
 import type { FormState } from "@/app/admin/actions";
 import { BANKS } from "@/lib/vietqr";
 
 export async function updateClientAction(clientId: string, _: FormState, form: FormData): Promise<FormState> {
-  const { supabase } = await requireAdmin();
+  const { supabase } = await requireClientAccess(clientId);
   const text = (key: string) => String(form.get(key) ?? "").trim() || null;
 
   const name = text("name");

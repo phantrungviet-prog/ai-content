@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { requireAdmin } from "@/lib/auth";
+import { requireClientAccess } from "@/lib/auth";
 import { ProductManager, type ProductView } from "./ProductManager";
 
 // Image generation and copywriting run in this page's server actions and can take ~30s.
@@ -8,7 +8,7 @@ export const maxDuration = 60;
 
 export default async function ProductsPage(props: PageProps<"/admin/clients/[id]/products">) {
   const { id } = await props.params;
-  const { supabase } = await requireAdmin();
+  const { supabase } = await requireClientAccess(id);
 
   const { data: client } = await supabase.from("clients").select("id, name").eq("id", id).maybeSingle();
   if (!client) notFound();

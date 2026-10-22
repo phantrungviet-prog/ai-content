@@ -3,13 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { extractMenuFromImages } from "@/lib/ai";
-import { requireAdmin } from "@/lib/auth";
+import { requireClientAccess } from "@/lib/auth";
 import type { MenuDraft } from "@/lib/menu";
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: string };
 
 export async function extractMenuAction(clientId: string, paths: string[]): Promise<Result<MenuDraft>> {
-  const { supabase } = await requireAdmin();
+  const { supabase } = await requireClientAccess(clientId);
   // Only files this client uploaded for its menu; prevents reading arbitrary storage objects.
   if (!paths.length || paths.length > 6 || !paths.every((p) => p.startsWith(`${clientId}/menu/`))) {
     return { ok: false, error: "Danh sách ảnh không hợp lệ (tối đa 6 ảnh)." };
@@ -55,7 +55,7 @@ const draftSchema = z.object({
 });
 
 export async function saveMenuAction(clientId: string, draft: MenuDraft, publish: boolean): Promise<Result<null>> {
-  const { supabase } = await requireAdmin();
+  const { supabase } = await requireClientAccess(clientId);
   const parsed = draftSchema.safeParse(draft);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Dữ liệu menu không hợp lệ." };
 

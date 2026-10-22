@@ -12,7 +12,8 @@ Approved plan: `C:\Users\ADMIN\.claude\plans\l-p-cho-t-i-m-t-binary-oasis.md` (i
 - **Free only**, no billing yet. Per-shop daily AI limits plus a global daily cap protect the shared Gemini free-tier quota.
 - **One account = one shop** (`clients.owner_id` unique).
 - **Keep the service mode**: the owner stays super admin (the `admins` table) and can see and edit every shop. Existing shops keep `owner_id = null`.
-Execute the plan's steps in order. Step 1 rewrites all RLS on a live database: write and pass `scripts/rls-check.mjs` (user A cannot read or modify user B's data) **before** telling the user to run migration `0003`.
+Execute the plan's steps in order.
+- **Step 1 status:** `rls-check` passed all checks on the test project (2026-10-22); 0003 not yet run on live, code not yet deployed: `supabase/migrations/0003_self_signup.sql`, the new `src/lib/auth.ts`, and `scripts/rls-check.mjs` (`npm run rls-check`, reads `.env.rls-test` for a separate **test** Supabase project). Order: run 0001–0003 on the test project and pass the check, then run 0003 on live, and only then deploy the code (it calls the `can_manage` RPC, which exists only after 0003). Step 1 rewrites all RLS on a live database: write and pass `scripts/rls-check.mjs` (user A cannot read or modify user B's data) **before** telling the user to run migration `0003`.
 
 ## MVP history
 - **Day 1 — done** (commit `b30e281`): admin login, clients CRUD, menu photo → Gemini → editable menu → publish → `/m/[slug]` + QR PNG.
@@ -32,7 +33,7 @@ Execute the plan's steps in order. Step 1 rewrites all RLS on a live database: w
   - `params` / `searchParams` / `cookies()` are async; type pages with the global `PageProps<"/route">` / `LayoutProps<"/route">` helpers (run `npx next typegen` after adding routes).
   - `cacheComponents` is deliberately **off**; pages that read cookies are simply dynamic.
 - Supabase via `@supabase/ssr`: `src/lib/supabase/server.ts` (per request) and `client.ts` (browser). No service-role key anywhere; everything runs as the signed-in user under RLS.
-- Every admin page and server action starts with `requireAdmin()` from `src/lib/auth.ts`. Admin rights come from the `public.admins` table (`is_admin()` in SQL), not just from being signed in.
+- Every admin page and server action starts with a helper from `src/lib/auth.ts`: `requireClientAccess(clientId)` (owner or super admin, checked by the `can_manage()` RPC), `requireUser()`, or `requireSuperAdmin()`. Product actions use `requireProductAccess` in their file. Call these outside `try/catch`, because `notFound()` and `redirect()` work by throwing. Shop data is publicly readable, so a row being visible through RLS does not prove access. Super admin rights come from the `public.admins` table (`is_admin()` in SQL).
 - Gemini: `@google/genai`, model from `GEMINI_MODEL`. Use structured JSON output with a zod schema (`z.toJSONSchema`) and validate with `safeParse`; see `extractMenuFromImages`.
 - Prices are whole VND integers. Anything a model or a person types goes through `parseVndPrice` (`src/lib/price.ts`, tested); display with `formatVnd`.
 - Client slugs are printed in QR codes: never make them editable.

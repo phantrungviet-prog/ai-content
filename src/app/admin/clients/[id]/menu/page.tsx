@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import QRCode from "qrcode";
-import { requireAdmin } from "@/lib/auth";
+import { requireClientAccess } from "@/lib/auth";
 import type { MenuDraft } from "@/lib/menu";
 import { siteUrl } from "@/lib/site-url";
 import { MenuEditor } from "./MenuEditor";
@@ -11,7 +11,7 @@ export const maxDuration = 60;
 
 export default async function MenuPage(props: PageProps<"/admin/clients/[id]/menu">) {
   const { id } = await props.params;
-  const { supabase } = await requireAdmin();
+  const { supabase } = await requireClientAccess(id);
 
   const { data: client } = await supabase.from("clients").select("id, name, slug").eq("id", id).maybeSingle();
   if (!client) notFound();

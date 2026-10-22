@@ -2,13 +2,14 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { requireAdmin } from "@/lib/auth";
+import { requireSuperAdmin, requireUser } from "@/lib/auth";
 import { slugify } from "@/lib/slug";
 
 export type FormState = { error?: string; ok?: boolean };
 
+// Shops created here have no owner and are managed by the super admin (service mode).
 export async function createClientAction(_: FormState, form: FormData): Promise<FormState> {
-  const { supabase } = await requireAdmin();
+  const { supabase } = await requireSuperAdmin();
   const name = String(form.get("name") ?? "").trim();
   const slug = slugify(String(form.get("slug") ?? "") || name);
   const type = form.get("type") === "shop" ? "shop" : "restaurant";
@@ -22,7 +23,7 @@ export async function createClientAction(_: FormState, form: FormData): Promise<
 }
 
 export async function signOutAction() {
-  const { supabase } = await requireAdmin();
+  const { supabase } = await requireUser();
   await supabase.auth.signOut();
   redirect("/login");
 }

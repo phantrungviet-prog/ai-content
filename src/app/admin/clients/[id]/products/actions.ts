@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { notFound } from "next/navigation";
 import { generatePost, generateStudioImage, type GeneratedPost, type ImageInput } from "@/lib/ai";
 import {
   ASPECT_RATIOS,
@@ -12,25 +13,29 @@ import {
   type StudioPreset,
   type Tone,
 } from "@/lib/ai-options";
-import { requireAdmin } from "@/lib/auth";
+import { assertCanManage, requireClientAccess, requireUser } from "@/lib/auth";
 import { formatVnd, parseVndPrice } from "@/lib/price";
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: string };
-type Supabase = Awaited<ReturnType<typeof requireAdmin>>["supabase"];
+type Supabase = Awaited<ReturnType<typeof requireUser>>["supabase"];
 
 const fail = (error: unknown, fallback: string): { ok: false; error: string } => ({
   ok: false,
   error: error instanceof Error ? error.message : fallback,
 });
 
-async function loadProduct(supabase: Supabase, productId: string) {
+// Products are publicly readable, so loading one proves nothing: also check the caller manages its client.
+// Call outside try/catch: notFound() works by throwing.
+async function requireProductAccess(productId: string) {
+  const { supabase } = await requireUser();
   const { data } = await supabase
     .from("products")
     .select("id, client_id, name, price, description, original_image_path, studio_image_paths")
     .eq("id", productId)
     .maybeSingle();
-  if (!data) throw new Error("Không tìm thấy sản phẩm");
-  return data as {
+  if (!data) notFound();
+  await assertCanManage(supabase, data.client_id);
+  const product = data as {
     id: string;
     client_id: string;
     name: string;
@@ -39,6 +44,7 @@ async function loadProduct(supabase: Supabase, productId: string) {
     original_image_path: string | null;
     studio_image_paths: string[];
   };
+  return { supabase, product };
 }
 
 async function downloadOriginal(supabase: Supabase, path: string): Promise<ImageInput> {
@@ -53,7 +59,7 @@ export async function createProductAction(
   clientId: string,
   input: { name: string; price: string; description: string; imagePath: string | null },
 ): Promise<Result<null>> {
-  const { supabase } = await requireAdmin();
+  const { supabase } = await requireClientAccess(clientId);
   const name = input.name.trim();
   if (!name) return { ok: false, error: "Nhập tên sản phẩm." };
   if (input.imagePath && !input.imagePath.startsWith(`${clientId}/products/`)) return { ok: false, error: "Ảnh không hợp lệ." };
@@ -71,9 +77,8 @@ export async function createProductAction(
 }
 
 export async function deleteProductAction(productId: string): Promise<Result<null>> {
-  const { supabase } = await requireAdmin();
+  const { supabase, product } = await requireProductAccess(productId);
   try {
-    const product = await loadProduct(supabase, productId);
     const { error } = await supabase.from("products").delete().eq("id", productId);
     if (error) throw new Error(error.message);
     // Best effort: a leftover file is harmless, a failed delete of the row is not.
@@ -92,11 +97,10 @@ export async function generateStudioImageAction(
   preset: StudioPreset,
   aspectRatio: AspectRatio,
 ): Promise<Result<{ path: string; url: string }>> {
-  const { supabase } = await requireAdmin();
+  const { supabase, product } = await requireProductAccess(productId);
   if (!(preset in STUDIO_PRESETS) || !ASPECT_RATIOS.includes(aspectRatio)) return { ok: false, error: "Lựa chọn không hợp lệ." };
 
   try {
-    const product = await loadProduct(supabase, productId);
     if (!product.original_image_path) return { ok: false, error: "Sản phẩm chưa có ảnh gốc." };
 
     const result = await generateStudioImage(await downloadOriginal(supabase, product.original_image_path), preset, aspectRatio);
@@ -117,9 +121,8 @@ function assertOwnPath(product: { id: string; client_id: string }, path: string)
 }
 
 export async function approveStudioImageAction(productId: string, path: string): Promise<Result<null>> {
-  const { supabase } = await requireAdmin();
+  const { supabase, product } = await requireProductAccess(productId);
   try {
-    const product = await loadProduct(supabase, productId);
     assertOwnPath(product, path);
     if (!product.studio_image_paths.includes(path)) {
       const { error } = await supabase
@@ -137,9 +140,8 @@ export async function approveStudioImageAction(productId: string, path: string):
 
 // Removes an image, whether it is an unapproved candidate or an already approved one.
 export async function removeStudioImageAction(productId: string, path: string): Promise<Result<null>> {
-  const { supabase } = await requireAdmin();
+  const { supabase, product } = await requireProductAccess(productId);
   try {
-    const product = await loadProduct(supabase, productId);
     assertOwnPath(product, path);
     if (product.studio_image_paths.includes(path)) {
       const { error } = await supabase
@@ -157,11 +159,10 @@ export async function removeStudioImageAction(productId: string, path: string): 
 }
 
 export async function generatePostAction(productId: string, platform: Platform, tone: Tone): Promise<Result<GeneratedPost>> {
-  const { supabase } = await requireAdmin();
+  const { supabase, product } = await requireProductAccess(productId);
   if (!(platform in PLATFORMS) || !(tone in TONES)) return { ok: false, error: "Lựa chọn không hợp lệ." };
 
   try {
-    const product = await loadProduct(supabase, productId);
     const { data: client } = await supabase.from("clients").select("name, type, phone, address").eq("id", product.client_id).single();
     if (!client) throw new Error("Không tìm thấy khách hàng");
 
@@ -197,9 +198,8 @@ export async function generatePostAction(productId: string, platform: Platform, 
 }
 
 export async function saveDescriptionAction(productId: string, description: string): Promise<Result<null>> {
-  const { supabase } = await requireAdmin();
+  const { supabase, product } = await requireProductAccess(productId);
   try {
-    const product = await loadProduct(supabase, productId);
     const { error } = await supabase.from("products").update({ description: description.trim() || null }).eq("id", productId);
     if (error) throw new Error(error.message);
     refresh(product.client_id);

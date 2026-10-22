@@ -2,7 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 // Refreshes the Supabase session cookie and keeps signed-out visitors out of /admin.
-// This is only an optimistic check: data access is enforced by RLS and requireAdmin().
+// This is only an optimistic check: data access is enforced by RLS and the helpers in src/lib/auth.ts.
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
 

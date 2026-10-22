@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { requireAdmin } from "@/lib/auth";
+import { requireClientAccess } from "@/lib/auth";
 import { ClientInfoForm } from "./ClientInfoForm";
 
 export default async function ClientPage(props: PageProps<"/admin/clients/[id]">) {
   const { id } = await props.params;
-  const { supabase } = await requireAdmin();
+  const { supabase } = await requireClientAccess(id);
   const { data: client } = await supabase.from("clients").select("*").eq("id", id).maybeSingle();
   if (!client) notFound();
 

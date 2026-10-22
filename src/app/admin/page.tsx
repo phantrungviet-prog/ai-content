@@ -1,9 +1,16 @@
 import Link from "next/link";
-import { requireAdmin } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import { requireUser } from "@/lib/auth";
 import { CreateClientForm } from "./CreateClientForm";
 
 export default async function AdminHome() {
-  const { supabase } = await requireAdmin();
+  const { supabase, user, isAdmin } = await requireUser();
+  if (!isAdmin) {
+    // One account = one shop: owners go straight to it, new accounts create it first.
+    const { data: own } = await supabase.from("clients").select("id").eq("owner_id", user.id).maybeSingle();
+    redirect(own ? `/admin/clients/${own.id}` : "/onboarding");
+  }
+
   const { data: clients } = await supabase
     .from("clients")
     .select("id, name, slug, type, menus(is_published)")
