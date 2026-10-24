@@ -1,18 +1,29 @@
 -- One catalog per client: products are the catalog, and each menu item links to the product with its name.
 -- Run in Supabase SQL Editor after 0003. Runs in one transaction: either everything applies or nothing does.
+-- Safe to run again: steps that already happened are skipped (a partial run once left a project half-migrated).
 begin;
 
-alter table public.menu_items add column product_id uuid references public.products (id) on delete set null;
-create index menu_items_product_id_idx on public.menu_items (product_id);
-create index products_client_id_lower_name_idx on public.products (client_id, lower(trim(name)));
+alter table public.menu_items add column if not exists product_id uuid references public.products (id) on delete set null;
+create index if not exists menu_items_product_id_idx on public.menu_items (product_id);
+create index if not exists products_client_id_lower_name_idx on public.products (client_id, lower(trim(name)));
 
 -- Featured products are the ones the public site (/s/[slug]) shows. Menus can create dozens of products,
 -- so new ones are not featured; products that existed before this migration are, so live sites stay the same.
-alter table public.products add column is_featured boolean not null default false;
-update public.products set is_featured = true;
+-- The backfill runs only when the column is created, so a rerun does not star products made from menus.
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'products' and column_name = 'is_featured'
+  ) then
+    alter table public.products add column is_featured boolean not null default false;
+    update public.products set is_featured = true;
+  end if;
+end;
+$$;
 
 -- A menu item may only point to a product of the same client (otherwise an owner could show another shop's photos).
-drop policy "manage all" on public.menu_items;
+drop policy if exists "manage all" on public.menu_items;
 create policy "manage all" on public.menu_items for all
   using (exists (
     select 1 from public.menu_categories c join public.menus m on m.id = c.menu_id
