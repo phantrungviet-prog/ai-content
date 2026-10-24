@@ -1,5 +1,5 @@
 // Checks that RLS keeps shops apart: user B must not read or change user A's private data.
-// Run against a TEST Supabase project that has migrations 0001-0003 applied, never against production:
+// Run against a TEST Supabase project that has migrations 0001-0004 applied, never against production:
 //   node --env-file=.env.rls-test scripts/rls-check.mjs
 // .env.rls-test needs:
 //   SUPABASE_URL, SUPABASE_ANON_KEY            test project (Settings -> API)
@@ -84,9 +84,9 @@ await must(
     p_categories: [{ name: "RLS", items: [{ name: "Món thử", description: "", price: 10000, options: [], is_available: true }] }],
   }),
 );
-const menuA = await must(a.supabase.from("menus").select("id, menu_categories(id, menu_items(id))").eq("client_id", shopA.id).single());
-const categoryId = menuA.menu_categories[0].id;
-const itemId = menuA.menu_categories[0].menu_items[0].id;
+const menuA = await must(a.supabase.from("menus").select("id, menu_categories(id, menu_items(id, product_id))").eq("client_id", shopA.id).single());
+const categoryIdRef = { value: menuA.menu_categories[0].id };
+const itemIdRef = { value: menuA.menu_categories[0].menu_items[0].id };
 const file = () => new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], { type: "image/jpeg" });
 const originalPath = `${shopA.id}/products/rls-${crypto.randomUUID()}.jpg`;
 const publicPath = `${shopA.id}/products/${product.id}/rls-${crypto.randomUUID()}.jpg`;
@@ -103,11 +103,62 @@ await check("A logs AI usage", async () => !(await a.supabase.from("ai_usage").i
 await check("A reads own AI usage", async () => (await must(a.supabase.from("ai_usage").select("id").eq("client_id", shopA.id))).length >= 1);
 await check("A reads global AI count", async () => (await must(a.supabase.rpc("ai_usage_global_count", { p_since: "2000-01-01T00:00:00Z" }))) >= 1);
 
+console.log("Catalog: menu items link to the shop's own products");
+const linkedProductId = menuA.menu_categories[0].menu_items[0].product_id;
+await check("save_menu links the item to a product of A", async () => {
+  const p = await must(a.supabase.from("products").select("client_id, name, price, is_featured").eq("id", linkedProductId).single());
+  return (p.client_id === shopA.id && p.name === "Món thử" && p.price === 10000 && p.is_featured === false) || p;
+});
+await check("same name in other case reuses the product and syncs the price", async () => {
+  await must(
+    a.supabase.rpc("save_menu", {
+      p_client_id: shopA.id,
+      p_title: "RLS menu",
+      p_published: false,
+      p_categories: [{ name: "RLS", items: [{ name: "MÓN THỬ", description: "", price: 12000, options: [], is_available: true }] }],
+    }),
+  );
+  const items = await must(a.supabase.from("menu_items").select("product_id, menu_categories!inner(menu_id)").eq("menu_categories.menu_id", menuA.id));
+  const p = await must(a.supabase.from("products").select("price").eq("id", linkedProductId).single());
+  const dupes = await must(a.supabase.from("products").select("id").eq("client_id", shopA.id).ilike("name", "món thử"));
+  return (items.length === 1 && items[0].product_id === linkedProductId && p.price === 12000 && dupes.length === 1) || { items, p, dupes };
+});
+// Restore the fixture the later checks expect (price 10000) and refresh the item id that save_menu replaced.
+await must(
+  a.supabase.rpc("save_menu", {
+    p_client_id: shopA.id,
+    p_title: "RLS menu",
+    p_published: false,
+    p_categories: [{ name: "RLS", items: [{ name: "Món thử", description: "", price: 10000, options: [], is_available: true }] }],
+  }),
+);
+{
+  const fresh = await must(a.supabase.from("menus").select("menu_categories(id, menu_items(id))").eq("id", menuA.id).single());
+  categoryIdRef.value = fresh.menu_categories[0].id;
+  itemIdRef.value = fresh.menu_categories[0].menu_items[0].id;
+}
+await check("B cannot link own menu item to A's product", async () => {
+  await must(
+    b.supabase.rpc("save_menu", {
+      p_client_id: shopB.id,
+      p_title: "B menu",
+      p_published: false,
+      p_categories: [{ name: "B", items: [{ name: "B item", description: "", price: 1, options: [], is_available: true }] }],
+    }),
+  );
+  const menuB = await must(b.supabase.from("menus").select("id, menu_categories(menu_items(id, product_id))").eq("client_id", shopB.id).single());
+  const bItem = menuB.menu_categories[0].menu_items[0];
+  const result = await mustError(b.supabase.from("menu_items").update({ product_id: linkedProductId }).eq("id", bItem.id));
+  await b.supabase.from("menus").delete().eq("id", menuB.id);
+  await b.supabase.from("products").delete().eq("id", bItem.product_id);
+  return result;
+});
+
 console.log("User B cannot read A's private data");
 await check("posts", () => blocked(b.supabase.from("content_posts").select("id").eq("client_id", shopA.id)));
 await check("unpublished menu", () => blocked(b.supabase.from("menus").select("id").eq("client_id", shopA.id)));
 await check("unpublished menu categories", () => blocked(b.supabase.from("menu_categories").select("id").eq("menu_id", menuA.id)));
-await check("unpublished menu items", () => blocked(b.supabase.from("menu_items").select("id").eq("category_id", categoryId)));
+await check("unpublished menu items", () => blocked(b.supabase.from("menu_items").select("id").eq("category_id", categoryIdRef.value)));
 await check("AI usage", () => blocked(b.supabase.from("ai_usage").select("id").eq("client_id", shopA.id)));
 await check("original image download", () => mustError(b.supabase.storage.from("originals").download(originalPath)));
 await check("original image signed URL", () => mustError(b.supabase.storage.from("originals").createSignedUrl(originalPath, 60)));
@@ -131,8 +182,8 @@ await check("insert post into A", () => mustError(b.supabase.from("content_posts
 await check("delete A's post", () => blocked(b.supabase.from("content_posts").delete().eq("id", post.id).select("id")));
 await check("save_menu on A", () => mustError(b.supabase.rpc("save_menu", { p_client_id: shopA.id, p_title: "x", p_published: true, p_categories: [] })));
 await check("insert category into A's menu", () => mustError(b.supabase.from("menu_categories").insert({ menu_id: menuA.id, name: "x" })));
-await check("insert item into A's category", () => mustError(b.supabase.from("menu_items").insert({ category_id: categoryId, name: "x" })));
-await check("update A's menu item", () => blocked(b.supabase.from("menu_items").update({ price: 1 }).eq("id", itemId).select("id")));
+await check("insert item into A's category", () => mustError(b.supabase.from("menu_items").insert({ category_id: categoryIdRef.value, name: "x" })));
+await check("update A's menu item", () => blocked(b.supabase.from("menu_items").update({ price: 1 }).eq("id", itemIdRef.value).select("id")));
 await check("log AI usage on A", () => mustError(b.supabase.from("ai_usage").insert({ client_id: shopA.id, kind: "post" })));
 await check("upload into A's originals", () => mustError(b.supabase.storage.from("originals").upload(`${shopA.id}/products/evil.jpg`, file())));
 await check("upload into A's public-assets", () => mustError(b.supabase.storage.from("public-assets").upload(`${shopA.id}/products/evil.jpg`, file())));
@@ -146,7 +197,7 @@ await check("delete A's public image", async () => {
 await check("A's data intact after B's attempts", async () => {
   const shop = await must(a.supabase.from("clients").select("name").eq("id", shopA.id).single());
   const prod = await must(a.supabase.from("products").select("name").eq("id", product.id).single());
-  const item = await must(a.supabase.from("menu_items").select("price").eq("id", itemId).single());
+  const item = await must(a.supabase.from("menu_items").select("price").eq("id", itemIdRef.value).single());
   return (shop.name === "RLS a" && prod.name === "RLS product" && item.price === 10000) || { shop, prod, item };
 });
 
@@ -183,7 +234,7 @@ if (admin) {
   await check("disabled shop hidden from anon", () => blocked(anon.from("clients").select("id").eq("id", shopA.id)));
   await check("disabled shop's products hidden from anon", () => blocked(anon.from("products").select("id").eq("client_id", shopA.id)));
   await check("disabled shop's menu hidden from anon", () => blocked(anon.from("menus").select("id").eq("client_id", shopA.id)));
-  await check("disabled shop's menu items hidden from anon", () => blocked(anon.from("menu_items").select("id").eq("id", itemId)));
+  await check("disabled shop's menu items hidden from anon", () => blocked(anon.from("menu_items").select("id").eq("id", itemIdRef.value)));
   await check("owner still sees own disabled shop", async () => (await must(a.supabase.from("clients").select("id").eq("id", shopA.id))).length === 1);
   await check("owner cannot re-enable", () => mustError(a.supabase.from("clients").update({ is_disabled: false }).eq("id", shopA.id)));
   await must(admin.supabase.from("clients").update({ is_disabled: false }).eq("id", shopA.id));
@@ -197,6 +248,7 @@ await a.supabase.storage.from("public-assets").remove([publicPath]);
 await a.supabase.from("content_posts").delete().eq("id", post.id);
 await a.supabase.from("products").delete().eq("id", product.id);
 await a.supabase.from("menus").delete().eq("id", menuA.id);
+await a.supabase.from("products").delete().eq("id", linkedProductId);
 
 console.log(failures ? `\n${failures} check(s) FAILED` : "\nAll checks passed");
 process.exit(failures ? 1 : 0);

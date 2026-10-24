@@ -71,6 +71,8 @@ export async function createProductAction(
     price: parseVndPrice(input.price),
     description: input.description.trim() || null,
     original_image_path: input.imagePath,
+    // Added by hand, so the owner wants it on the site; products created from the menu start unstarred.
+    is_featured: true,
   });
   if (error) return { ok: false, error: error.message };
   refresh(clientId);
@@ -216,4 +218,13 @@ export async function saveDescriptionAction(productId: string, description: stri
   } catch (err) {
     return fail(err, "Không lưu được mô tả.");
   }
+}
+
+// Starred products are the ones the public site (/s/[slug]) shows.
+export async function setFeaturedAction(productId: string, featured: boolean): Promise<Result<null>> {
+  const { supabase, product } = await requireProductAccess(productId);
+  const { error } = await supabase.from("products").update({ is_featured: featured }).eq("id", productId);
+  if (error) return { ok: false, error: error.message };
+  refresh(product.client_id);
+  return { ok: true, data: null };
 }

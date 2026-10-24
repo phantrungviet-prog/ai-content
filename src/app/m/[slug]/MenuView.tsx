@@ -7,7 +7,7 @@ import { slugify } from "@/lib/slug";
 
 export type PublicCategory = {
   name: string;
-  items: { name: string; description: string | null; price: number | null; options: MenuOption[]; available: boolean }[];
+  items: { name: string; description: string | null; price: number | null; options: MenuOption[]; available: boolean; imageUrl: string | null }[];
 };
 
 export function MenuView({ categories }: { categories: PublicCategory[] }) {
@@ -48,24 +48,30 @@ export function MenuView({ categories }: { categories: PublicCategory[] }) {
           <h2 className="mb-2 text-lg font-bold text-orange-700">{category.name}</h2>
           <ul className="divide-y divide-slate-100">
             {category.items.map((item, ii) => (
-              <li key={ii} className={`py-3 ${item.available ? "" : "opacity-50"}`}>
-                <div className="flex items-baseline justify-between gap-3">
-                  <p className="font-medium">
-                    {item.name}
-                    {!item.available && <span className="ml-2 rounded bg-slate-200 px-1.5 py-0.5 text-xs font-normal">Hết món</span>}
-                  </p>
-                  {item.price != null && <p className="shrink-0 font-semibold">{formatVnd(item.price)}</p>}
-                </div>
-                {item.description && <p className="mt-0.5 text-sm text-slate-500">{item.description}</p>}
-                {item.options.length > 0 && (
-                  <div className="mt-1 flex flex-wrap gap-x-4 text-sm text-slate-600">
-                    {item.options.map((o, oi) => (
-                      <span key={oi}>
-                        {o.label} <span className="font-medium">{formatVnd(o.price)}</span>
-                      </span>
-                    ))}
-                  </div>
+              <li key={ii} className={`flex gap-3 py-3 ${item.available ? "" : "opacity-50"}`}>
+                {item.imageUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element -- Supabase storage URL
+                  <img src={item.imageUrl} alt={item.name} className="size-16 shrink-0 rounded-lg object-cover" loading="lazy" />
                 )}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <p className="font-medium">
+                      {item.name}
+                      {!item.available && <span className="ml-2 rounded bg-slate-200 px-1.5 py-0.5 text-xs font-normal">Hết món</span>}
+                    </p>
+                    {item.price != null && <p className="shrink-0 font-semibold">{formatVnd(item.price)}</p>}
+                  </div>
+                  {item.description && <p className="mt-0.5 text-sm text-slate-500">{item.description}</p>}
+                  {item.options.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-x-4 text-sm text-slate-600">
+                      {item.options.map((o, oi) => (
+                        <span key={oi}>
+                          {o.label} <span className="font-medium">{formatVnd(o.price)}</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </li>
             ))}
           </ul>

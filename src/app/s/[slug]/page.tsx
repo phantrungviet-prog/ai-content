@@ -23,6 +23,8 @@ const loadSite = cache(async (slug: string) => {
       .from("products")
       .select("id, name, price, description, studio_image_paths")
       .eq("client_id", client.id)
+      // Menus create a product per item; the site shows only the ones the owner starred.
+      .eq("is_featured", true)
       .order("created_at", { ascending: false })
       .limit(24),
     supabase.from("menus").select("id").eq("client_id", client.id).eq("is_published", true).maybeSingle(),

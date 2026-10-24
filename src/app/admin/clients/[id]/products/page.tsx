@@ -17,8 +17,9 @@ export default async function ProductsPage(props: PageProps<"/admin/clients/[id]
 
   const { data: rows } = await supabase
     .from("products")
-    .select("id, name, price, description, original_image_path, studio_image_paths")
+    .select("id, name, price, description, original_image_path, studio_image_paths, is_featured, menu_items(count)")
     .eq("client_id", id)
+    .order("is_featured", { ascending: false })
     .order("created_at", { ascending: false });
 
   // Originals are private: sign them for an hour so the admin can see them.
@@ -37,6 +38,8 @@ export default async function ProductsPage(props: PageProps<"/admin/clients/[id]
     description: r.description ?? "",
     originalUrl: r.original_image_path ? (signedByPath.get(r.original_image_path) ?? null) : null,
     studioImages: (r.studio_image_paths as string[]).map((path) => ({ path, url: publicUrl(path) })),
+    isFeatured: r.is_featured as boolean,
+    inMenu: ((r.menu_items as { count: number }[] | null)?.[0]?.count ?? 0) > 0,
   }));
 
   return (

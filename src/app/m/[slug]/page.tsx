@@ -24,19 +24,34 @@ const loadMenu = cache(async (slug: string) => {
   // RLS only returns published menus to visitors; also filter explicitly so a signed-in admin previews the same thing.
   const { data: menu } = await supabase
     .from("menus")
-    .select("title, menu_categories(name, sort_order, menu_items(name, description, price, options, is_available, sort_order))")
+    .select(
+      "title, menu_categories(name, sort_order, menu_items(name, description, price, options, is_available, sort_order, products(studio_image_paths)))",
+    )
     .eq("client_id", client.id)
     .eq("is_published", true)
     .maybeSingle();
   if (!menu) return null;
 
+  // The first approved studio photo of the item's catalog product, if any.
+  const imageUrl = (product: { studio_image_paths: string[] } | null) => {
+    const path = product?.studio_image_paths[0];
+    return path ? supabase.storage.from("public-assets").getPublicUrl(path).data.publicUrl : null;
+  };
   const categories: PublicCategory[] = menu.menu_categories
     .sort((a, b) => a.sort_order - b.sort_order)
     .map((c) => ({
       name: c.name,
       items: c.menu_items
         .sort((a, b) => a.sort_order - b.sort_order)
-        .map((i) => ({ name: i.name, description: i.description, price: i.price, options: i.options ?? [], available: i.is_available })),
+        .map((i) => ({
+          name: i.name,
+          description: i.description,
+          price: i.price,
+          options: i.options ?? [],
+          available: i.is_available,
+          // A many-to-one embed comes back as an object, but the untyped client cannot know that.
+          imageUrl: imageUrl((Array.isArray(i.products) ? i.products[0] : i.products) ?? null),
+        })),
     }));
   return { client, title: menu.title as string | null, categories };
 });

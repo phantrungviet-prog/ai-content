@@ -5,6 +5,7 @@ import { ASPECT_RATIOS, PLATFORMS, STUDIO_PRESETS, studioPrompt, TONES, type Asp
 import { remainingText } from "@/lib/ai-limits";
 import { resizeImage } from "@/lib/image-resize";
 import { formatVnd } from "@/lib/price";
+import { slugify } from "@/lib/slug";
 import { createClient } from "@/lib/supabase/client";
 import {
   approveStudioImageAction,
@@ -14,6 +15,7 @@ import {
   generateStudioImageAction,
   removeStudioImageAction,
   saveDescriptionAction,
+  setFeaturedAction,
 } from "./actions";
 
 export type ProductView = {
@@ -23,7 +25,14 @@ export type ProductView = {
   description: string;
   originalUrl: string | null;
   studioImages: { path: string; url: string }[];
+  // Shown on the public site.
+  isFeatured: boolean;
+  // Linked from at least one menu item.
+  inMenu: boolean;
 };
+
+// Cards start open only for small catalogs; a menu can add dozens of products.
+const OPEN_BY_DEFAULT_MAX = 5;
 
 // postsLeft: AI posts this shop may still write today, shared by all products; null = unlimited (super admin).
 export function ProductManager({
@@ -37,13 +46,37 @@ export function ProductManager({
   autoStudio: boolean;
   postsLeft: number | null;
 }) {
+  const [query, setQuery] = useState("");
+  const q = slugify(query);
+  const visible = q ? products.filter((p) => slugify(p.name).includes(q)) : products;
+  const featured = products.filter((p) => p.isFeatured).length;
+
   return (
     <div className="space-y-6">
       <NewProductForm clientId={clientId} />
       {products.length === 0 ? (
-        <p className="text-slate-500">Chưa có sản phẩm. Thêm sản phẩm đầu tiên ở trên.</p>
+        <p className="text-slate-500">Chưa có sản phẩm. Thêm sản phẩm đầu tiên ở trên, hoặc lưu menu để tạo sản phẩm từ các món.</p>
       ) : (
-        products.map((p) => <ProductCard key={p.id} clientId={clientId} product={p} autoStudio={autoStudio} postsLeft={postsLeft} />)
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-slate-500">
+              {products.length} sản phẩm · ⭐ {featured} hiện trên website. Món trong menu tự có ở đây; bấm ☆ để đưa lên website.
+            </p>
+            {products.length > OPEN_BY_DEFAULT_MAX && (
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Tìm sản phẩm..." className="input w-full sm:w-64" />
+            )}
+          </div>
+          {visible.map((p) => (
+            <ProductCard
+              key={p.id}
+              clientId={clientId}
+              product={p}
+              autoStudio={autoStudio}
+              postsLeft={postsLeft}
+              defaultOpen={products.length <= OPEN_BY_DEFAULT_MAX}
+            />
+          ))}
+        </>
       )}
     </div>
   );
@@ -108,19 +141,56 @@ function NewProductForm({ clientId }: { clientId: string }) {
   );
 }
 
-function ProductCard({ clientId, product, autoStudio, postsLeft }: { clientId: string; product: ProductView; autoStudio: boolean; postsLeft: number | null }) {
+function ProductCard({
+  clientId,
+  product,
+  autoStudio,
+  postsLeft,
+  defaultOpen,
+}: {
+  clientId: string;
+  product: ProductView;
+  autoStudio: boolean;
+  postsLeft: number | null;
+  defaultOpen: boolean;
+}) {
   const [deleting, startDelete] = useTransition();
+  const [starring, startStar] = useTransition();
+  const [open, setOpen] = useState(defaultOpen);
+  const thumbnail = product.studioImages[0]?.url ?? product.originalUrl;
   return (
-    <article className="card space-y-5">
-      <header className="flex items-start justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold">{product.name}</h2>
-          {product.price != null && <p className="text-sm text-slate-500">{formatVnd(product.price)}</p>}
-        </div>
+    <article className={`card ${open ? "space-y-5" : "py-4"}`}>
+      <header className="flex items-center gap-3">
+        <button
+          disabled={starring}
+          onClick={() =>
+            startStar(async () => {
+              const result = await setFeaturedAction(product.id, !product.isFeatured);
+              if (!result.ok) alert(result.error);
+            })
+          }
+          title={product.isFeatured ? "Đang hiện trên website, bấm để ẩn" : "Bấm để hiện trên website"}
+          className={`shrink-0 text-2xl leading-none ${product.isFeatured ? "text-amber-400" : "text-slate-300 hover:text-amber-300"}`}
+        >
+          {product.isFeatured ? "★" : "☆"}
+        </button>
+        {thumbnail && (
+          // eslint-disable-next-line @next/next/no-img-element -- Supabase storage URL
+          <img src={thumbnail} alt="" className="size-12 shrink-0 rounded-lg object-cover" />
+        )}
+        <button onClick={() => setOpen(!open)} className="min-w-0 flex-1 text-left">
+          <h2 className="truncate text-lg font-semibold">{product.name}</h2>
+          <p className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
+            {product.price != null && <span>{formatVnd(product.price)}</span>}
+            {product.inMenu && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700">Trong menu</span>}
+            {!open && <span className="text-xs text-indigo-600">Mở ▾</span>}
+          </p>
+        </button>
         <button
           disabled={deleting}
           onClick={() => {
-            if (!confirm(`Xóa sản phẩm "${product.name}" và toàn bộ ảnh?`)) return;
+            const warning = product.inMenu ? "\n\nMón này đang có trong menu: lần lưu menu sau sẽ tạo lại sản phẩm (không có ảnh)." : "";
+            if (!confirm(`Xóa sản phẩm "${product.name}" và toàn bộ ảnh?${warning}`)) return;
             startDelete(async () => {
               const result = await deleteProductAction(product.id);
               if (!result.ok) alert(result.error);
@@ -131,8 +201,12 @@ function ProductCard({ clientId, product, autoStudio, postsLeft }: { clientId: s
           {deleting ? "Đang xóa..." : "Xóa"}
         </button>
       </header>
-      <StudioSection clientId={clientId} product={product} autoStudio={autoStudio} />
-      <PostSection product={product} postsLeft={postsLeft} />
+      {open && (
+        <>
+          <StudioSection clientId={clientId} product={product} autoStudio={autoStudio} />
+          <PostSection product={product} postsLeft={postsLeft} />
+        </>
+      )}
     </article>
   );
 }

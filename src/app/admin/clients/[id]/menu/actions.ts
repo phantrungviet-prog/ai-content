@@ -78,6 +78,8 @@ export async function saveMenuAction(clientId: string, draft: MenuDraft, publish
 
   const { data: client } = await supabase.from("clients").select("slug").eq("id", clientId).single();
   revalidatePath(`/admin/clients/${clientId}/menu`);
+  // save_menu creates a product for every new item name.
+  revalidatePath(`/admin/clients/${clientId}/products`);
   if (client) revalidatePath(`/m/${client.slug}`);
   return { ok: true, data: null };
 }
