@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { ASPECT_RATIOS, PLATFORMS, STUDIO_PRESETS, studioPrompt, TONES, type AspectRatio, type Platform, type StudioPreset, type Tone } from "@/lib/ai-options";
+import { remainingText } from "@/lib/ai-limits";
 import { resizeImage } from "@/lib/image-resize";
 import { formatVnd } from "@/lib/price";
 import { createClient } from "@/lib/supabase/client";
@@ -24,14 +25,25 @@ export type ProductView = {
   studioImages: { path: string; url: string }[];
 };
 
-export function ProductManager({ clientId, products, autoStudio }: { clientId: string; products: ProductView[]; autoStudio: boolean }) {
+// postsLeft: AI posts this shop may still write today, shared by all products; null = unlimited (super admin).
+export function ProductManager({
+  clientId,
+  products,
+  autoStudio,
+  postsLeft,
+}: {
+  clientId: string;
+  products: ProductView[];
+  autoStudio: boolean;
+  postsLeft: number | null;
+}) {
   return (
     <div className="space-y-6">
       <NewProductForm clientId={clientId} />
       {products.length === 0 ? (
         <p className="text-slate-500">Chưa có sản phẩm. Thêm sản phẩm đầu tiên ở trên.</p>
       ) : (
-        products.map((p) => <ProductCard key={p.id} clientId={clientId} product={p} autoStudio={autoStudio} />)
+        products.map((p) => <ProductCard key={p.id} clientId={clientId} product={p} autoStudio={autoStudio} postsLeft={postsLeft} />)
       )}
     </div>
   );
@@ -96,7 +108,7 @@ function NewProductForm({ clientId }: { clientId: string }) {
   );
 }
 
-function ProductCard({ clientId, product, autoStudio }: { clientId: string; product: ProductView; autoStudio: boolean }) {
+function ProductCard({ clientId, product, autoStudio, postsLeft }: { clientId: string; product: ProductView; autoStudio: boolean; postsLeft: number | null }) {
   const [deleting, startDelete] = useTransition();
   return (
     <article className="card space-y-5">
@@ -120,7 +132,7 @@ function ProductCard({ clientId, product, autoStudio }: { clientId: string; prod
         </button>
       </header>
       <StudioSection clientId={clientId} product={product} autoStudio={autoStudio} />
-      <PostSection product={product} />
+      <PostSection product={product} postsLeft={postsLeft} />
     </article>
   );
 }
@@ -314,7 +326,7 @@ async function download(url: string, filename: string) {
   URL.revokeObjectURL(href);
 }
 
-function PostSection({ product }: { product: ProductView }) {
+function PostSection({ product, postsLeft }: { product: ProductView; postsLeft: number | null }) {
   const [platform, setPlatform] = useState<Platform>("facebook");
   const [tone, setTone] = useState<Tone>("friendly");
   const [text, setText] = useState("");
@@ -351,10 +363,11 @@ function PostSection({ product }: { product: ProductView }) {
             </option>
           ))}
         </select>
-        <button disabled={pending} onClick={generate} className="btn-primary">
+        <button disabled={pending || postsLeft === 0} onClick={generate} className="btn-primary">
           {pending ? "Đang viết..." : text ? "Viết lại" : "Viết bài"}
         </button>
       </div>
+      <p className="text-xs text-slate-500">{remainingText("post", postsLeft)}</p>
 
       {text && (
         <>

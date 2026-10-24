@@ -13,6 +13,7 @@ import {
   type StudioPreset,
   type Tone,
 } from "@/lib/ai-options";
+import { checkAiQuota, recordAiUsage } from "@/lib/ai-quota";
 import { assertCanManage, requireClientAccess, requireUser } from "@/lib/auth";
 import { formatVnd, parseVndPrice } from "@/lib/price";
 
@@ -27,7 +28,7 @@ const fail = (error: unknown, fallback: string): { ok: false; error: string } =>
 // Products are publicly readable, so loading one proves nothing: also check the caller manages its client.
 // Call outside try/catch: notFound() works by throwing.
 async function requireProductAccess(productId: string) {
-  const { supabase } = await requireUser();
+  const { supabase, isAdmin } = await requireUser();
   const { data } = await supabase
     .from("products")
     .select("id, client_id, name, price, description, original_image_path, studio_image_paths")
@@ -44,7 +45,7 @@ async function requireProductAccess(productId: string) {
     original_image_path: string | null;
     studio_image_paths: string[];
   };
-  return { supabase, product };
+  return { supabase, isAdmin, product };
 }
 
 async function downloadOriginal(supabase: Supabase, path: string): Promise<ImageInput> {
@@ -97,13 +98,16 @@ export async function generateStudioImageAction(
   preset: StudioPreset,
   aspectRatio: AspectRatio,
 ): Promise<Result<{ path: string; url: string }>> {
-  const { supabase, product } = await requireProductAccess(productId);
+  const { supabase, isAdmin, product } = await requireProductAccess(productId);
   if (!(preset in STUDIO_PRESETS) || !ASPECT_RATIOS.includes(aspectRatio)) return { ok: false, error: "Lựa chọn không hợp lệ." };
+  const quotaError = await checkAiQuota(supabase, product.client_id, "image", isAdmin);
+  if (quotaError) return { ok: false, error: quotaError };
 
   try {
     if (!product.original_image_path) return { ok: false, error: "Sản phẩm chưa có ảnh gốc." };
 
     const result = await generateStudioImage(await downloadOriginal(supabase, product.original_image_path), preset, aspectRatio);
+    await recordAiUsage(supabase, product.client_id, "image");
     const ext = result.mimeType === "image/jpeg" ? "jpg" : "png";
     const path = `${product.client_id}/products/${product.id}/${crypto.randomUUID()}.${ext}`;
     const { error } = await supabase.storage.from("public-assets").upload(path, result.data, { contentType: result.mimeType });
@@ -159,8 +163,10 @@ export async function removeStudioImageAction(productId: string, path: string): 
 }
 
 export async function generatePostAction(productId: string, platform: Platform, tone: Tone): Promise<Result<GeneratedPost>> {
-  const { supabase, product } = await requireProductAccess(productId);
+  const { supabase, isAdmin, product } = await requireProductAccess(productId);
   if (!(platform in PLATFORMS) || !(tone in TONES)) return { ok: false, error: "Lựa chọn không hợp lệ." };
+  const quotaError = await checkAiQuota(supabase, product.client_id, "post", isAdmin);
+  if (quotaError) return { ok: false, error: quotaError };
 
   try {
     const { data: client } = await supabase.from("clients").select("name, type, phone, address").eq("id", product.client_id).single();
@@ -181,6 +187,9 @@ export async function generatePostAction(productId: string, platform: Platform, 
       },
       image,
     );
+    await recordAiUsage(supabase, product.client_id, "post");
+    // Refreshes the "calls left today" count on the page.
+    refresh(product.client_id);
 
     await supabase.from("content_posts").insert({
       client_id: product.client_id,

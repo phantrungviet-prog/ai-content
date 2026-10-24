@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { aiRemainingToday } from "@/lib/ai-quota";
 import { requireClientAccess } from "@/lib/auth";
 import { ProductManager, type ProductView } from "./ProductManager";
 
@@ -9,7 +10,7 @@ export const maxDuration = 300;
 
 export default async function ProductsPage(props: PageProps<"/admin/clients/[id]/products">) {
   const { id } = await props.params;
-  const { supabase } = await requireClientAccess(id);
+  const { supabase, isAdmin } = await requireClientAccess(id);
 
   const { data: client } = await supabase.from("clients").select("id, name").eq("id", id).maybeSingle();
   if (!client) notFound();
@@ -26,6 +27,7 @@ export default async function ProductsPage(props: PageProps<"/admin/clients/[id]
     ? await supabase.storage.from("originals").createSignedUrls(originalPaths, 3600)
     : { data: [] };
   const signedByPath = new Map((signed ?? []).map((s) => [s.path, s.signedUrl]));
+  const postsLeft = await aiRemainingToday(supabase, id, "post", isAdmin);
   const publicUrl = (path: string) => supabase.storage.from("public-assets").getPublicUrl(path).data.publicUrl;
 
   const products: ProductView[] = (rows ?? []).map((r) => ({
@@ -46,7 +48,7 @@ export default async function ProductsPage(props: PageProps<"/admin/clients/[id]
         <h1 className="mt-1 text-2xl font-semibold">Sản phẩm · Ảnh Studio · Viết bài</h1>
       </div>
       {/* Automatic generation needs a billed Gemini project; without it the admin uses the Gemini app by hand. */}
-      <ProductManager clientId={id} products={products} autoStudio={process.env.GEMINI_IMAGE_ENABLED === "true"} />
+      <ProductManager clientId={id} products={products} autoStudio={process.env.GEMINI_IMAGE_ENABLED === "true"} postsLeft={postsLeft} />
     </div>
   );
 }

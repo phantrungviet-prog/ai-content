@@ -3,17 +3,20 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { extractMenuFromImages } from "@/lib/ai";
+import { checkAiQuota, recordAiUsage } from "@/lib/ai-quota";
 import { requireClientAccess } from "@/lib/auth";
 import type { MenuDraft } from "@/lib/menu";
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: string };
 
 export async function extractMenuAction(clientId: string, paths: string[]): Promise<Result<MenuDraft>> {
-  const { supabase } = await requireClientAccess(clientId);
+  const { supabase, isAdmin } = await requireClientAccess(clientId);
   // Only files this client uploaded for its menu; prevents reading arbitrary storage objects.
   if (!paths.length || paths.length > 6 || !paths.every((p) => p.startsWith(`${clientId}/menu/`))) {
     return { ok: false, error: "Danh sách ảnh không hợp lệ (tối đa 6 ảnh)." };
   }
+  const quotaError = await checkAiQuota(supabase, clientId, "menu", isAdmin);
+  if (quotaError) return { ok: false, error: quotaError };
 
   try {
     const images = await Promise.all(
@@ -24,6 +27,9 @@ export async function extractMenuAction(clientId: string, paths: string[]): Prom
       }),
     );
     const draft = await extractMenuFromImages(images);
+    await recordAiUsage(supabase, clientId, "menu");
+    // Refreshes the "calls left today" count on the page.
+    revalidatePath(`/admin/clients/${clientId}/menu`);
     if (!draft.categories.length) return { ok: false, error: "Không đọc được món nào từ ảnh. Thử ảnh rõ hơn, chụp thẳng." };
 
     await supabase.from("menus").upsert({ client_id: clientId, source_image_paths: paths }, { onConflict: "client_id" });

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import QRCode from "qrcode";
+import { aiRemainingToday } from "@/lib/ai-quota";
 import { requireClientAccess } from "@/lib/auth";
 import type { MenuDraft } from "@/lib/menu";
 import { siteUrl } from "@/lib/site-url";
@@ -12,7 +13,7 @@ export const maxDuration = 300;
 
 export default async function MenuPage(props: PageProps<"/admin/clients/[id]/menu">) {
   const { id } = await props.params;
-  const { supabase } = await requireClientAccess(id);
+  const { supabase, isAdmin } = await requireClientAccess(id);
 
   const { data: client } = await supabase.from("clients").select("id, name, slug").eq("id", id).maybeSingle();
   if (!client) notFound();
@@ -41,6 +42,7 @@ export default async function MenuPage(props: PageProps<"/admin/clients/[id]/men
       })),
   };
 
+  const aiLeft = await aiRemainingToday(supabase, id, "menu", isAdmin);
   const publicUrl = `${await siteUrl()}/m/${client.slug}`;
   const qrDataUrl = await QRCode.toDataURL(publicUrl, { width: 1024, margin: 2, errorCorrectionLevel: "M" });
 
@@ -59,6 +61,7 @@ export default async function MenuPage(props: PageProps<"/admin/clients/[id]/men
         initialPublished={menu?.is_published ?? false}
         publicUrl={publicUrl}
         qrDataUrl={qrDataUrl}
+        aiLeft={aiLeft}
       />
     </div>
   );

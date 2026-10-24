@@ -5,6 +5,7 @@ import { resizeImage } from "@/lib/image-resize";
 import type { MenuCategoryDraft, MenuDraft, MenuItemDraft } from "@/lib/menu";
 import { formatVnd, parseVndPrice } from "@/lib/price";
 import { createClient } from "@/lib/supabase/client";
+import { remainingText } from "@/lib/ai-limits";
 import { extractMenuAction, saveMenuAction } from "./actions";
 
 type Props = {
@@ -14,6 +15,8 @@ type Props = {
   initialPublished: boolean;
   publicUrl: string;
   qrDataUrl: string;
+  // AI menu reads left today; null = unlimited (super admin).
+  aiLeft: number | null;
 };
 
 const emptyItem = (): MenuItemDraft => ({ name: "", description: "", price: null, options: [], is_available: true });
@@ -26,7 +29,7 @@ function move<T>(list: T[], index: number, delta: number): T[] {
   return next;
 }
 
-export function MenuEditor({ clientId, slug, initialDraft, initialPublished, publicUrl, qrDataUrl }: Props) {
+export function MenuEditor({ clientId, slug, initialDraft, initialPublished, publicUrl, qrDataUrl, aiLeft }: Props) {
   const [draft, setDraft] = useState(initialDraft);
   const [published, setPublished] = useState(initialPublished);
   const [dirty, setDirty] = useState(false);
@@ -101,20 +104,21 @@ export function MenuEditor({ clientId, slug, initialDraft, initialPublished, pub
         <section className="card space-y-3">
           <h2 className="font-semibold">1. Chụp / tải ảnh menu</h2>
           <p className="text-sm text-slate-500">Chụp thẳng, đủ sáng, rõ chữ. Menu nhiều trang thì chọn nhiều ảnh cùng lúc.</p>
-          <label className={`btn-secondary cursor-pointer ${extracting ? "pointer-events-none opacity-50" : ""}`}>
+          <label className={`btn-secondary cursor-pointer ${extracting || aiLeft === 0 ? "pointer-events-none opacity-50" : ""}`}>
             {extracting ? "Đang xử lý..." : "Chọn ảnh menu"}
             <input
               type="file"
               accept="image/*"
               multiple
               className="hidden"
-              disabled={extracting}
+              disabled={extracting || aiLeft === 0}
               onChange={(e) => {
                 onFiles(e.target.files);
                 e.target.value = "";
               }}
             />
           </label>
+          <p className="text-xs text-slate-500">{remainingText("menu", aiLeft)}</p>
           {previews.length > 0 && (
             <div className="flex gap-2 overflow-x-auto">
               {previews.map((src) => (
