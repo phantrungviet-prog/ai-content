@@ -4,19 +4,19 @@
 
 Web app for small shops and restaurants in Vietnam: AI studio product photos, AI-written posts, and paper menu → QR e-menu, plus a simple public website per shop. Owner: VietPhan. UI text is Vietnamese; talk to the user in Vietnamese.
 
-Built first as an internal tool (only the owner logs in and manages shops for clients). That **2-day MVP is done and deployed on Vercel** from GitHub `phantrungviet-prog/ai-content` (branch `main`).
+Built first as an internal tool (a 2-day MVP), then upgraded to **self-signup**: shop owners register and run their own shop, and the owner remains super admin. Deployed on Vercel (project `ai-content-lq1p`) from GitHub `phantrungviet-prog/ai-content` (branch `main`).
 
-## Next: self-signup upgrade (approved, not started)
+## Self-signup upgrade (done, 2026-10-24)
 Approved plan: `C:\Users\ADMIN\.claude\plans\l-p-cho-t-i-m-t-binary-oasis.md` (it replaced the old MVP plan). Decisions the user made:
 - Shop owners sign up themselves with **email + password** only (email confirmation, password reset). No Google login, no SMS.
 - **Free only**, no billing yet. Per-shop daily AI limits plus a global daily cap protect the shared Gemini free-tier quota.
 - **One account = one shop** (`clients.owner_id` unique).
 - **Keep the service mode**: the owner stays super admin (the `admins` table) and can see and edit every shop. Existing shops keep `owner_id = null`.
-Execute the plan's steps in order.
 - **Step 1 — done** (commit `852b95e`): migration 0003 is live; `rls-check` passed on the test project (`npm run rls-check`, reads `.env.rls-test`). Rerun it after every RLS change.
 - **Step 2 — done** (commits `85f4c2f` onward): signup, `/auth/confirm` (token_hash), forgot/reset password, onboarding all verified on the deploy. Brevo SMTP is set up in Supabase (required to edit email templates). Both templates must link to `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email` (signup) or `&type=recovery`. The live Vercel project is **`ai-content-lq1p`**; the project named `ai-content` is an unused duplicate with no env vars.
 - **Step 3 — done:** `/admin` for the super admin lists shops from `admin_list_clients()` (owner email, AI calls today) with Khóa / Mở khóa (`setClientDisabledAction`); `/m` and `/s` filter `is_disabled = false` explicitly, because RLS hides disabled shops only from visitors; owners see a banner on their shop page.
-- **Step 4 — code done:** daily AI limits. `src/lib/ai-limits.ts` (pure, tested: Vietnam-day start, per-shop limits menu 5 / post 30 / image 0 unless `GEMINI_IMAGE_ENABLED`, global `AI_DAILY_GLOBAL_LIMIT` default 300) and `src/lib/ai-quota.ts` (`checkAiQuota` before Gemini, fails closed; `recordAiUsage` only **after a successful** call, a deliberate change from the plan so Google outages do not use up a shop's calls). The super admin is never limited but is counted. The menu and products pages show "Còn X lượt … hôm nay".
+- **Step 4 — done:** daily AI limits. `src/lib/ai-limits.ts` (pure, tested: Vietnam-day start, per-shop limits menu 5 / post 30 / image 0 unless `GEMINI_IMAGE_ENABLED`, global `AI_DAILY_GLOBAL_LIMIT` default 300) and `src/lib/ai-quota.ts` (`checkAiQuota` before Gemini, fails closed; `recordAiUsage` only **after a successful** call, a deliberate change from the plan so Google outages do not use up a shop's calls). The super admin is never limited but is counted. The menu and products pages show "Còn X lượt … hôm nay".
+- **Step 5 — code done:** landing page `/`, `/terms`, `/privacy` (Vietnamese drafts against the 2025 Law on Personal Data Protection and Decree 13/2023; **the user must have them reviewed**; contact email from `NEXT_PUBLIC_CONTACT_EMAIL`, never hard-coded), README and `.env.example` updated. The privacy page promises account deletion within 30 days on request; there is no self-service delete yet, so the super admin deletes the client row and the auth user by hand.
 
 ## MVP history
 - **Day 1 — done** (commit `b30e281`): admin login, clients CRUD, menu photo → Gemini → editable menu → publish → `/m/[slug]` + QR PNG.
