@@ -16,6 +16,8 @@ const loadMenu = cache(async (slug: string) => {
     .from("clients")
     .select("id, name, address, phone, zalo, map_url, logo_url, bank_bin, bank_account_no, bank_account_name")
     .eq("slug", slug)
+    // RLS hides disabled shops from visitors only; owners and admins must get the same 404.
+    .eq("is_disabled", false)
     .maybeSingle();
   if (!client) return null;
 

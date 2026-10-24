@@ -29,3 +29,15 @@ export async function signOutAction() {
   await supabase.auth.signOut();
   redirect("/login");
 }
+
+// A disabled shop's public pages return 404; the owner can still sign in and see their data.
+export async function setClientDisabledAction(clientId: string, disabled: boolean) {
+  const { supabase } = await requireSuperAdmin();
+  const { data, error } = await supabase.from("clients").update({ is_disabled: disabled }).eq("id", clientId).select("slug").single();
+  if (error) throw new Error(`Không cập nhật được trạng thái khóa: ${error.message}`);
+
+  revalidatePath("/admin");
+  revalidatePath(`/admin/clients/${clientId}`);
+  revalidatePath(`/m/${data.slug}`);
+  revalidatePath(`/s/${data.slug}`);
+}

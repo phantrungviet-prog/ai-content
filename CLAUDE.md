@@ -14,7 +14,8 @@ Approved plan: `C:\Users\ADMIN\.claude\plans\l-p-cho-t-i-m-t-binary-oasis.md` (i
 - **Keep the service mode**: the owner stays super admin (the `admins` table) and can see and edit every shop. Existing shops keep `owner_id = null`.
 Execute the plan's steps in order.
 - **Step 1 — done** (commit `852b95e`): migration 0003 is live; `rls-check` passed on the test project (`npm run rls-check`, reads `.env.rls-test`). Rerun it after every RLS change.
-- **Step 2 — code done, not yet deployed or tried with real email:** `/signup`, `/auth/confirm` (token_hash), `/forgot-password`, `/reset-password`, `/onboarding`, reserved slugs in `slugError()`, login links, proxy redirects. Needs the Supabase Auth settings and email templates from the plan's section 6.
+- **Step 2 — done** (commits `85f4c2f` onward): signup, `/auth/confirm` (token_hash), forgot/reset password, onboarding all verified on the deploy. Brevo SMTP is set up in Supabase (required to edit email templates). Both templates must link to `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email` (signup) or `&type=recovery`. The live Vercel project is **`ai-content-lq1p`**; the project named `ai-content` is an unused duplicate with no env vars.
+- **Step 3 — code done:** `/admin` for the super admin lists shops from `admin_list_clients()` (owner email, AI calls today) with Khóa / Mở khóa (`setClientDisabledAction`); `/m` and `/s` filter `is_disabled = false` explicitly, because RLS hides disabled shops only from visitors; owners see a banner on their shop page.
 
 ## MVP history
 - **Day 1 — done** (commit `b30e281`): admin login, clients CRUD, menu photo → Gemini → editable menu → publish → `/m/[slug]` + QR PNG.

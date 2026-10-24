@@ -22,6 +22,12 @@ export default async function ClientPage(props: PageProps<"/admin/clients/[id]">
         <p className="text-sm text-slate-500">Đường dẫn cố định: /{client.slug}</p>
       </div>
 
+      {client.is_disabled && (
+        <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700 ring-1 ring-red-200">
+          Cửa hàng đang bị khóa: website và menu QR tạm thời không hiển thị với khách. Liên hệ quản trị viên để được mở lại.
+        </p>
+      )}
+
       <div className="grid gap-4 sm:grid-cols-3">
         <ToolCard href={`/admin/clients/${id}/menu`} title="Menu điện tử QR" desc="Chụp menu giấy → menu online + mã QR" />
         <ToolCard href={`/admin/clients/${id}/products`} title="Sản phẩm · Ảnh Studio · Viết bài" desc="Ghép nền đẹp, viết caption Facebook / TikTok" />

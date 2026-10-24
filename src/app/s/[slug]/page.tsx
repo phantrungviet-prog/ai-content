@@ -13,6 +13,8 @@ const loadSite = cache(async (slug: string) => {
     .from("clients")
     .select("id, name, type, intro, phone, zalo, address, map_url")
     .eq("slug", slug)
+    // RLS hides disabled shops from visitors only; owners and admins must get the same 404.
+    .eq("is_disabled", false)
     .maybeSingle();
   if (!client) return null;
 
